@@ -99,13 +99,13 @@ const renderMeasurementGroup = (measurements) => {
 const App = () => {
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
-  
+
   // User profile
-  const [userHeight, setUserHeight] = useState('');
-  const [userWeight, setUserWeight] = useState('');
-  const [userGender, setUserGender] = useState('');
-  const [userAge, setUserAge] = useState('');
-  
+  const [userHeight, setUserHeight] = useState("");
+  const [userWeight, setUserWeight] = useState("");
+  const [userGender, setUserGender] = useState("");
+  const [userAge, setUserAge] = useState("");
+
   // Photo sequence state
   const [currentStep, setCurrentStep] = useState(0);
   const [capturedPhotos, setCapturedPhotos] = useState({});
@@ -117,7 +117,7 @@ const App = () => {
   const loadImage = (src) => {
     return new Promise((resolve) => {
       const img = new window.Image();
-      img.crossOrigin = 'anonymous';
+      img.crossOrigin = "anonymous";
       img.onload = () => resolve(img);
       img.src = src;
     });
@@ -127,10 +127,10 @@ const App = () => {
   const captureCurrentStep = () => {
     const imageSrc = webcamRef.current.getScreenshot();
     const stepId = PHOTO_STEPS[currentStep].id;
-    
-    setCapturedPhotos(prev => ({
+
+    setCapturedPhotos((prev) => ({
       ...prev,
-      [stepId]: imageSrc
+      [stepId]: imageSrc,
     }));
 
     // Move to next step or complete sequence
@@ -141,58 +141,135 @@ const App = () => {
     }
   };
 
+  // Create MediaPipe Pose instance with better error handling
+  const createPoseInstance = async () => {
+    try {
+      // Try multiple CDN sources for better reliability
+      const cdnSources = [
+        "https://cdn.jsdelivr.net/npm/@mediapipe/pose",
+        "https://unpkg.com/@mediapipe/pose",
+      ];
+
+      let pose = null;
+      let lastError = null;
+
+      for (const cdnBase of cdnSources) {
+        try {
+          pose = new Pose({
+            locateFile: (file) => `${cdnBase}/${file}`,
+          });
+
+          // Test if pose can be configured
+          pose.setOptions({
+            modelComplexity: 1,
+            smoothLandmarks: true,
+            enableSegmentation: false,
+            minDetectionConfidence: 0.5,
+            minTrackingConfidence: 0.5,
+          });
+
+          // If we get here, the pose instance is working
+          break;
+        } catch (error) {
+          lastError = error;
+          pose = null;
+          continue;
+        }
+      }
+
+      if (!pose) {
+        throw new Error(
+          `Failed to initialize MediaPipe from all CDN sources. Last error: ${lastError?.message}`
+        );
+      }
+
+      return pose;
+    } catch (error) {
+      throw new Error(`MediaPipe initialization failed: ${error.message}`);
+    }
+  };
+
   // Process all captured photos
   const processAllPhotos = async () => {
     setProcessing(true);
     setResults(null);
-    
+
     try {
       const processedResults = {};
-      
+
+      // Create pose instance once and reuse
+      const pose = await createPoseInstance();
+
       // Process each photo with MediaPipe
       for (const [stepId, imageSrc] of Object.entries(capturedPhotos)) {
-        const img = await loadImage(imageSrc);
-        
-        // Setup MediaPipe Pose
-        const pose = new Pose({
-          locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/pose/${file}`
-        });
-        pose.setOptions({
-          modelComplexity: 1,
-          smoothLandmarks: true,
-          enableSegmentation: false,
-          minDetectionConfidence: 0.5,
-          minTrackingConfidence: 0.5
-        });
+        try {
+          const img = await loadImage(imageSrc);
 
-        // Run pose estimation
-        const poseResults = await new Promise((resolve) => {
-          pose.onResults(resolve);
-          pose.send({ image: img });
-        });
+          // Add timeout to prevent hanging
+          const poseResults = await Promise.race([
+            new Promise((resolve) => {
+              pose.onResults(resolve);
+              pose.send({ image: img });
+            }),
+            new Promise((_, reject) =>
+              setTimeout(
+                () => reject(new Error("MediaPipe processing timeout")),
+                10000
+              )
+            ),
+          ]);
 
-        if (poseResults.poseLandmarks) {
-          processedResults[stepId] = {
-            landmarks: poseResults.poseLandmarks,
-            image: img,
-            imageSrc: imageSrc
-          };
+          if (
+            poseResults &&
+            poseResults.poseLandmarks &&
+            poseResults.poseLandmarks.length > 0
+          ) {
+            processedResults[stepId] = {
+              landmarks: poseResults.poseLandmarks,
+              image: img,
+              imageSrc: imageSrc,
+            };
+          } else {
+            console.warn(`No pose landmarks detected for ${stepId}`);
+          }
+        } catch (stepError) {
+          console.error(`Error processing ${stepId}:`, stepError);
+          // Continue with other photos even if one fails
         }
+      }
+
+      // Check if we have any successful results
+      if (Object.keys(processedResults).length === 0) {
+        throw new Error(
+          "No pose landmarks detected in any photos. Please ensure you are clearly visible in the frame and try again."
+        );
       }
 
       // Calculate measurements from multiple angles
       const measurements = calculateMultiAngleMeasurements(processedResults);
       setResults(measurements);
-      
+
       // Draw landmarks on the current displayed image
       if (processedResults.front) {
-        drawLandmarks(processedResults.front.landmarks, processedResults.front.imageSrc);
+        drawLandmarks(
+          processedResults.front.landmarks,
+          processedResults.front.imageSrc
+        );
       }
-      
     } catch (error) {
-      setResults({ error: 'Processing failed. Please try again.', errorMessage: error.message });
+      console.error("Processing error:", error);
+      setResults({
+        error: "Processing failed. Please try again.",
+        errorMessage: error.message,
+        suggestions: [
+          "Ensure you have a stable internet connection",
+          "Make sure you are clearly visible in all photos",
+          "Try refreshing the page and taking new photos",
+          "Check that your device camera is working properly",
+        ],
+      });
     }
-    
+
     setProcessing(false);
   };
 
@@ -203,32 +280,49 @@ const App = () => {
       weight: Number(userWeight),
       gender: userGender,
       age: Number(userAge),
-      bmi: userWeight && userHeight ? (Number(userWeight) / Math.pow(Number(userHeight) / 100, 2)).toFixed(1) : null
+      bmi:
+        userWeight && userHeight
+          ? (
+              Number(userWeight) / Math.pow(Number(userHeight) / 100, 2)
+            ).toFixed(1)
+          : null,
     };
 
     const measurements = {};
 
     // Process front view (core measurements)
     if (processedResults.front) {
-      const frontMeasurements = processFrontView(processedResults.front.landmarks, userProfile);
+      const frontMeasurements = processFrontView(
+        processedResults.front.landmarks,
+        userProfile
+      );
       Object.assign(measurements, frontMeasurements);
     }
 
     // Process side view (depth measurements)
     if (processedResults.side) {
-      const sideMeasurements = processSideView(processedResults.side.landmarks, userProfile);
+      const sideMeasurements = processSideView(
+        processedResults.side.landmarks,
+        userProfile
+      );
       Object.assign(measurements, sideMeasurements);
     }
 
     // Process arms extended (better arm measurements)
     if (processedResults.arms_extended) {
-      const armMeasurements = processArmsExtended(processedResults.arms_extended.landmarks, userProfile);
+      const armMeasurements = processArmsExtended(
+        processedResults.arms_extended.landmarks,
+        userProfile
+      );
       Object.assign(measurements, armMeasurements);
     }
 
     // Process legs apart (better leg measurements)
     if (processedResults.legs_apart) {
-      const legMeasurements = processLegsApart(processedResults.legs_apart.landmarks, userProfile);
+      const legMeasurements = processLegsApart(
+        processedResults.legs_apart.landmarks,
+        userProfile
+      );
       Object.assign(measurements, legMeasurements);
     }
 
@@ -248,7 +342,7 @@ const App = () => {
   // Process front view measurements
   const processFrontView = (landmarks, userProfile) => {
     const imageSize = { width: 320, height: 400 };
-    
+
     // Key landmarks
     const lShoulder = landmarks[11];
     const rShoulder = landmarks[12];
@@ -263,314 +357,374 @@ const App = () => {
     const lAnkle = landmarks[27];
     const rAnkle = landmarks[28];
     const top = landmarks[0]; // Nose/head
-    
+
     // Calculate pose height for scaling
-    const ankle = (lAnkle && rAnkle) ? (lAnkle.y > rAnkle.y ? lAnkle : rAnkle) : (lAnkle || rAnkle);
+    const ankle =
+      lAnkle && rAnkle
+        ? lAnkle.y > rAnkle.y
+          ? lAnkle
+          : rAnkle
+        : lAnkle || rAnkle;
     const poseHeight = Math.abs(top.y - ankle.y);
-    
+
     // Calculate pixel distances
     const shoulderPx = getDistance(
       { x: lShoulder.x * imageSize.width, y: lShoulder.y * imageSize.height },
       { x: rShoulder.x * imageSize.width, y: rShoulder.y * imageSize.height }
     );
-    
+
     const hipPx = getDistance(
       { x: lHip.x * imageSize.width, y: lHip.y * imageSize.height },
       { x: rHip.x * imageSize.width, y: rHip.y * imageSize.height }
     );
-    
+
     // Estimate waist position (between chest and hips)
     // const waistY = (lShoulder.y + lHip.y) / 2;
     const waistPx = shoulderPx * 0.8; // Approximate waist as 80% of shoulder width
-    
+
     // Arm length (shoulder to wrist)
     const leftArmPx = getDistance(
       { x: lShoulder.x * imageSize.width, y: lShoulder.y * imageSize.height },
       { x: lWrist.x * imageSize.width, y: lWrist.y * imageSize.height }
     );
-    
+
     const rightArmPx = getDistance(
       { x: rShoulder.x * imageSize.width, y: rShoulder.y * imageSize.height },
       { x: rWrist.x * imageSize.width, y: rWrist.y * imageSize.height }
     );
-    
+
     const armLengthPx = Math.max(leftArmPx, rightArmPx);
-    
+
     // Leg length (hip to ankle)
     const leftLegPx = getDistance(
       { x: lHip.x * imageSize.width, y: lHip.y * imageSize.height },
       { x: lAnkle.x * imageSize.width, y: lAnkle.y * imageSize.height }
     );
-    
+
     const rightLegPx = getDistance(
       { x: rHip.x * imageSize.width, y: rHip.y * imageSize.height },
       { x: rAnkle.x * imageSize.width, y: rAnkle.y * imageSize.height }
     );
-    
+
     const legLengthPx = Math.max(leftLegPx, rightLegPx);
-    
+
     // Convert to cm
-    const shoulderWidth = pixelToCm(shoulderPx, imageSize.height, userProfile.height, poseHeight);
-    const hipWidth = pixelToCm(hipPx, imageSize.height, userProfile.height, poseHeight);
-    const waistWidth = pixelToCm(waistPx, imageSize.height, userProfile.height, poseHeight);
-    const armLength = pixelToCm(armLengthPx, imageSize.height, userProfile.height, poseHeight);
-    const legLength = pixelToCm(legLengthPx, imageSize.height, userProfile.height, poseHeight);
-    
+    const shoulderWidth = pixelToCm(
+      shoulderPx,
+      imageSize.height,
+      userProfile.height,
+      poseHeight
+    );
+    const hipWidth = pixelToCm(
+      hipPx,
+      imageSize.height,
+      userProfile.height,
+      poseHeight
+    );
+    const waistWidth = pixelToCm(
+      waistPx,
+      imageSize.height,
+      userProfile.height,
+      poseHeight
+    );
+    const armLength = pixelToCm(
+      armLengthPx,
+      imageSize.height,
+      userProfile.height,
+      poseHeight
+    );
+    const legLength = pixelToCm(
+      legLengthPx,
+      imageSize.height,
+      userProfile.height,
+      poseHeight
+    );
+
     // Calculate confidence scores
-    const shoulderConfidence = getConfidenceDisplay(calculateLandmarkConfidence(landmarks, [11, 12]));
-    const hipConfidence = getConfidenceDisplay(calculateLandmarkConfidence(landmarks, [23, 24]));
-    const armConfidence = getConfidenceDisplay(calculateLandmarkConfidence(landmarks, [11, 12, 15, 16]));
-    const legConfidence = getConfidenceDisplay(calculateLandmarkConfidence(landmarks, [23, 24, 27, 28]));
-    
+    const shoulderConfidence = getConfidenceDisplay(
+      calculateLandmarkConfidence(landmarks, [11, 12])
+    );
+    const hipConfidence = getConfidenceDisplay(
+      calculateLandmarkConfidence(landmarks, [23, 24])
+    );
+    const armConfidence = getConfidenceDisplay(
+      calculateLandmarkConfidence(landmarks, [11, 12, 15, 16])
+    );
+    const legConfidence = getConfidenceDisplay(
+      calculateLandmarkConfidence(landmarks, [23, 24, 27, 28])
+    );
+
     return {
       shoulderWidth: {
         value: shoulderWidth.toFixed(1),
         confidence: shoulderConfidence.score,
         confidencePercentage: shoulderConfidence.percentage,
         confidenceLabel: shoulderConfidence.label,
-        source: 'front_view',
-        unit: 'cm'
+        source: "front_view",
+        unit: "cm",
       },
       hipWidth: {
         value: hipWidth.toFixed(1),
         confidence: hipConfidence.score,
         confidencePercentage: hipConfidence.percentage,
         confidenceLabel: hipConfidence.label,
-        source: 'front_view',
-        unit: 'cm'
+        source: "front_view",
+        unit: "cm",
       },
       waistWidth: {
         value: waistWidth.toFixed(1),
         confidence: 0.6,
         confidencePercentage: 60,
-        confidenceLabel: 'medium',
-        source: 'front_view_estimated',
-        unit: 'cm'
+        confidenceLabel: "medium",
+        source: "front_view_estimated",
+        unit: "cm",
       },
       armLength: {
         value: armLength.toFixed(1),
         confidence: armConfidence.score,
         confidencePercentage: armConfidence.percentage,
         confidenceLabel: armConfidence.label,
-        source: 'front_view',
-        unit: 'cm'
+        source: "front_view",
+        unit: "cm",
       },
       legLength: {
         value: legLength.toFixed(1),
         confidence: legConfidence.score,
         confidencePercentage: legConfidence.percentage,
         confidenceLabel: legConfidence.label,
-        source: 'front_view',
-        unit: 'cm'
-      }
+        source: "front_view",
+        unit: "cm",
+      },
     };
   };
 
   // Process side view measurements
   const processSideView = (landmarks) => {
     const imageSize = { width: 320, height: 400 };
-    
+
     // Get depth measurements from side view
     // const nose = landmarks[0];
     const leftShoulder = landmarks[11];
     const rightShoulder = landmarks[12];
     const leftHip = landmarks[23];
     const rightHip = landmarks[24];
-    
+
     // Calculate depth (front to back) measurements
     // In side view, the x-axis represents depth
-    const shoulderDepth = Math.abs(leftShoulder.x - rightShoulder.x) * imageSize.width;
+    const shoulderDepth =
+      Math.abs(leftShoulder.x - rightShoulder.x) * imageSize.width;
     const hipDepth = Math.abs(leftHip.x - rightHip.x) * imageSize.width;
-    
+
     // Estimate chest depth (slightly more than shoulder)
     const chestDepth = shoulderDepth * 1.1;
-    
+
     // Estimate waist depth (between chest and hip)
     const waistDepth = (chestDepth + hipDepth) / 2;
-    
+
     return {
       chestDepth: {
         value: chestDepth.toFixed(1),
-        confidence: 'medium',
-        source: 'side_view',
-        unit: 'pixels'
+        confidence: "medium",
+        source: "side_view",
+        unit: "pixels",
       },
       waistDepth: {
         value: waistDepth.toFixed(1),
-        confidence: 'medium',
-        source: 'side_view',
-        unit: 'pixels'
+        confidence: "medium",
+        source: "side_view",
+        unit: "pixels",
       },
       hipDepth: {
         value: hipDepth.toFixed(1),
-        confidence: 'medium',
-        source: 'side_view',
-        unit: 'pixels'
-      }
+        confidence: "medium",
+        source: "side_view",
+        unit: "pixels",
+      },
     };
   };
 
   // Process arms extended measurements
   const processArmsExtended = (landmarks, userProfile) => {
     const imageSize = { width: 320, height: 400 };
-    
+
     // Calculate biceps and arm span
     const bicepsResult = estimateBiceps(landmarks, userProfile, imageSize);
-    
+
     // Calculate arm span (wrist to wrist)
     const leftWrist = landmarks[15];
     const rightWrist = landmarks[16];
-    
+
     if (leftWrist && rightWrist) {
       const armSpanPx = getDistance(
         { x: leftWrist.x * imageSize.width, y: leftWrist.y * imageSize.height },
-        { x: rightWrist.x * imageSize.width, y: rightWrist.y * imageSize.height }
+        {
+          x: rightWrist.x * imageSize.width,
+          y: rightWrist.y * imageSize.height,
+        }
       );
-      
+
       // Convert to cm (using approximate scaling)
-      const armSpanCm = (armSpanPx / imageSize.width) * userProfile.height * 1.1; // Arm span ≈ height
-      const armSpanConfidence = getConfidenceDisplay(calculateLandmarkConfidence(landmarks, [15, 16]) * 0.9);
-      
+      const armSpanCm =
+        (armSpanPx / imageSize.width) * userProfile.height * 1.1; // Arm span ≈ height
+      const armSpanConfidence = getConfidenceDisplay(
+        calculateLandmarkConfidence(landmarks, [15, 16]) * 0.9
+      );
+
       return {
         biceps: {
           value: bicepsResult.value.toFixed(1),
           confidence: bicepsResult.confidence,
           confidencePercentage: bicepsResult.confidencePercentage,
           confidenceLabel: bicepsResult.confidenceLabel,
-          source: 'arms_extended',
-          unit: 'cm'
+          source: "arms_extended",
+          unit: "cm",
         },
         armSpan: {
           value: armSpanCm.toFixed(1),
           confidence: armSpanConfidence.score,
           confidencePercentage: armSpanConfidence.percentage,
           confidenceLabel: armSpanConfidence.label,
-          source: 'arms_extended',
-          unit: 'cm'
-        }
+          source: "arms_extended",
+          unit: "cm",
+        },
       };
     }
-    
+
     return {
       biceps: {
         value: bicepsResult.value.toFixed(1),
         confidence: bicepsResult.confidence,
         confidencePercentage: bicepsResult.confidencePercentage,
         confidenceLabel: bicepsResult.confidenceLabel,
-        source: 'arms_extended',
-        unit: 'cm'
-      }
+        source: "arms_extended",
+        unit: "cm",
+      },
     };
   };
 
   // Process legs apart measurements
   const processLegsApart = (landmarks, userProfile) => {
     const imageSize = { width: 320, height: 400 };
-    
+
     // Calculate thigh and calf measurements
     const thighResult = estimateThigh(landmarks, userProfile, imageSize);
-    const calfResult = estimateCalf(landmarks, userProfile, imageSize, thighResult);
-    
+    const calfResult = estimateCalf(
+      landmarks,
+      userProfile,
+      imageSize,
+      thighResult
+    );
+
     return {
       thigh: {
         value: thighResult.value.toFixed(1),
         confidence: thighResult.confidence,
         confidencePercentage: thighResult.confidencePercentage,
         confidenceLabel: thighResult.confidenceLabel,
-        source: 'legs_apart',
-        unit: 'cm'
+        source: "legs_apart",
+        unit: "cm",
       },
       calf: {
         value: calfResult.value.toFixed(1),
         confidence: calfResult.confidence,
         confidencePercentage: calfResult.confidencePercentage,
         confidenceLabel: calfResult.confidenceLabel,
-        source: 'legs_apart',
-        unit: 'cm'
-      }
+        source: "legs_apart",
+        unit: "cm",
+      },
     };
   };
 
   // Calculate circumferences using front and side data
-  const calculateCircumferences = (frontLandmarks, sideLandmarks, userProfile) => {
+  const calculateCircumferences = (
+    frontLandmarks,
+    sideLandmarks,
+    userProfile
+  ) => {
     // const imageSize = { width: 320, height: 400 };
-    
+
     // Get front width measurements (converted to cm)
     const frontMeasurements = processFrontView(frontLandmarks, userProfile);
     const sideMeasurements = processSideView(sideLandmarks);
-    
+
     // Calculate circumferences using ellipse approximation
     const chestCirc = estimateCircumference(
-      Number(frontMeasurements.shoulderWidth.value), 
+      Number(frontMeasurements.shoulderWidth.value),
       Number(sideMeasurements.chestDepth.value) * 0.1, // Convert pixels to approximate cm
-      'chest', 
+      "chest",
       userProfile
     );
-    
+
     const waistCirc = estimateCircumference(
       Number(frontMeasurements.waistWidth.value),
       Number(sideMeasurements.waistDepth.value) * 0.1,
-      'waist',
+      "waist",
       userProfile
     );
-    
+
     const hipCirc = estimateCircumference(
       Number(frontMeasurements.hipWidth.value),
       Number(sideMeasurements.hipDepth.value) * 0.1,
-      'hips',
+      "hips",
       userProfile
     );
-    
+
     // Convert confidence scores to display format
     const chestConfidence = getConfidenceDisplay(chestCirc.confidence);
     const waistConfidence = getConfidenceDisplay(waistCirc.confidence);
     const hipConfidence = getConfidenceDisplay(hipCirc.confidence);
-    
+
     return {
       chestCircumference: {
         value: chestCirc.value.toFixed(1),
         confidence: chestConfidence.score,
         confidencePercentage: chestConfidence.percentage,
         confidenceLabel: chestConfidence.label,
-        source: 'front_and_side_combined',
-        unit: 'cm',
-        method: chestCirc.method
+        source: "front_and_side_combined",
+        unit: "cm",
+        method: chestCirc.method,
       },
       waistCircumference: {
         value: waistCirc.value.toFixed(1),
         confidence: waistConfidence.score,
         confidencePercentage: waistConfidence.percentage,
         confidenceLabel: waistConfidence.label,
-        source: 'front_and_side_combined',
-        unit: 'cm',
-        method: waistCirc.method
+        source: "front_and_side_combined",
+        unit: "cm",
+        method: waistCirc.method,
       },
       hipCircumference: {
         value: hipCirc.value.toFixed(1),
         confidence: hipConfidence.score,
         confidencePercentage: hipConfidence.percentage,
         confidenceLabel: hipConfidence.label,
-        source: 'front_and_side_combined',
-        unit: 'cm',
-        method: hipCirc.method
-      }
+        source: "front_and_side_combined",
+        unit: "cm",
+        method: hipCirc.method,
+      },
     };
   };
 
   // Draw landmarks on canvas
   const drawLandmarks = async (landmarks, imageSrc) => {
     const canvas = canvasRef.current;
-    const ctx = canvas.getContext('2d');
+    const ctx = canvas.getContext("2d");
     const img = await loadImage(imageSrc);
-    
+
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
 
     // Draw landmarks
     for (const landmark of landmarks) {
       ctx.beginPath();
-      ctx.arc(landmark.x * canvas.width, landmark.y * canvas.height, 4, 0, 2 * Math.PI);
-      ctx.fillStyle = 'red';
+      ctx.arc(
+        landmark.x * canvas.width,
+        landmark.y * canvas.height,
+        4,
+        0,
+        2 * Math.PI
+      );
+      ctx.fillStyle = "red";
       ctx.fill();
     }
   };
@@ -694,6 +848,9 @@ const App = () => {
                   screenshotFormat="image/jpeg"
                   width={320}
                   height={400}
+                  videoConstraints={{
+                    facingMode: "environment", // Forces back camera on mobile devices
+                  }}
                 />
               </div>
 
@@ -824,10 +981,32 @@ const App = () => {
                 borderRadius: 8,
               }}
             >
-              {results.error}
+              <div style={{ fontWeight: "bold", marginBottom: 8 }}>
+                {results.error}
+              </div>
               {results.errorMessage && (
-                <div style={{ fontSize: 12, marginTop: 8, opacity: 0.7 }}>
-                  {results.errorMessage}
+                <div style={{ fontSize: 12, marginBottom: 12, opacity: 0.7 }}>
+                  Technical details: {results.errorMessage}
+                </div>
+              )}
+              {results.suggestions && (
+                <div>
+                  <div
+                    style={{
+                      fontWeight: "bold",
+                      marginBottom: 8,
+                      fontSize: 14,
+                    }}
+                  >
+                    💡 Try these solutions:
+                  </div>
+                  <ul style={{ margin: 0, paddingLeft: 20 }}>
+                    {results.suggestions.map((suggestion, index) => (
+                      <li key={index} style={{ marginBottom: 4, fontSize: 13 }}>
+                        {suggestion}
+                      </li>
+                    ))}
+                  </ul>
                 </div>
               )}
             </div>
