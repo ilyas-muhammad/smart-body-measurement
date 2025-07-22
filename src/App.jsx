@@ -587,19 +587,28 @@ const App = () => {
   const isProfileComplete = userHeight && userWeight && userGender;
 
   return (
-    <div style={{ maxWidth: 600, margin: '0 auto', padding: 16 }}>
+    <div style={{ maxWidth: 600, margin: "0 auto", padding: 16 }}>
       <h1>Body Measurement Demo - Multi Photo</h1>
-      
+
       {/* User Profile Section */}
-      <div style={{ marginBottom: 24, padding: 16, border: '1px solid #ddd', borderRadius: 8 }}>
+      <div
+        style={{
+          marginBottom: 24,
+          padding: 16,
+          border: "1px solid #ddd",
+          borderRadius: 8,
+        }}
+      >
         <h3>Your Profile</h3>
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16 }}>
+        <div
+          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}
+        >
           <div>
             <label>Height (cm): </label>
             <input
               type="number"
               value={userHeight}
-              onChange={e => setUserHeight(e.target.value)}
+              onChange={(e) => setUserHeight(e.target.value)}
               placeholder="175"
             />
           </div>
@@ -608,13 +617,16 @@ const App = () => {
             <input
               type="number"
               value={userWeight}
-              onChange={e => setUserWeight(e.target.value)}
+              onChange={(e) => setUserWeight(e.target.value)}
               placeholder="70"
             />
           </div>
           <div>
             <label>Gender: </label>
-            <select value={userGender} onChange={e => setUserGender(e.target.value)}>
+            <select
+              value={userGender}
+              onChange={(e) => setUserGender(e.target.value)}
+            >
               <option value="">Select</option>
               <option value="male">Male</option>
               <option value="female">Female</option>
@@ -625,20 +637,31 @@ const App = () => {
             <input
               type="number"
               value={userAge}
-              onChange={e => setUserAge(e.target.value)}
+              onChange={(e) => setUserAge(e.target.value)}
               placeholder="30"
             />
           </div>
         </div>
         {userWeight && userHeight && (
-          <div style={{ marginTop: 8, fontSize: 14, color: '#666' }}>
-            BMI: {(Number(userWeight) / Math.pow(Number(userHeight) / 100, 2)).toFixed(1)}
+          <div style={{ marginTop: 8, fontSize: 14, color: "#666" }}>
+            BMI:{" "}
+            {(
+              Number(userWeight) / Math.pow(Number(userHeight) / 100, 2)
+            ).toFixed(1)}
           </div>
         )}
       </div>
 
       {!isProfileComplete && (
-        <div style={{ padding: 16, backgroundColor: '#fff3cd', borderRadius: 8, marginBottom: 16 }}>
+        <div
+          style={{
+            padding: 16,
+            backgroundColor: "#E0E0E0",
+            borderRadius: 8,
+            marginBottom: 16,
+            color: "#0E0E0E",
+          }}
+        >
           Please complete your profile above to continue.
         </div>
       )}
@@ -649,15 +672,22 @@ const App = () => {
           {!isSequenceComplete ? (
             <div style={{ marginBottom: 24 }}>
               <div style={{ marginBottom: 16 }}>
-                <h3>Step {currentStep + 1} of {PHOTO_STEPS.length}: {PHOTO_STEPS[currentStep].title}</h3>
-                <div style={{ fontSize: 24, marginBottom: 8 }}>{PHOTO_STEPS[currentStep].icon}</div>
-                <div style={{ fontSize: 18, marginBottom: 8 }}>{PHOTO_STEPS[currentStep].instruction}</div>
-                <div style={{ fontSize: 14, color: '#666' }}>
-                  Tips: {PHOTO_STEPS[currentStep].tips.join(' • ')}
+                <h3>
+                  Step {currentStep + 1} of {PHOTO_STEPS.length}:{" "}
+                  {PHOTO_STEPS[currentStep].title}
+                </h3>
+                <div style={{ fontSize: 24, marginBottom: 8 }}>
+                  {PHOTO_STEPS[currentStep].icon}
+                </div>
+                <div style={{ fontSize: 18, marginBottom: 8 }}>
+                  {PHOTO_STEPS[currentStep].instruction}
+                </div>
+                <div style={{ fontSize: 14, color: "#666" }}>
+                  Tips: {PHOTO_STEPS[currentStep].tips.join(" • ")}
                 </div>
               </div>
 
-              <div style={{ position: 'relative', marginBottom: 16 }}>
+              <div style={{ position: "relative", marginBottom: 16 }}>
                 <Webcam
                   audio={false}
                   ref={webcamRef}
@@ -667,16 +697,16 @@ const App = () => {
                 />
               </div>
 
-              <button 
+              <button
                 onClick={captureCurrentStep}
-                style={{ 
-                  padding: '12px 24px', 
-                  fontSize: 16, 
-                  backgroundColor: '#007bff', 
-                  color: 'white', 
-                  border: 'none', 
+                style={{
+                  padding: "12px 24px",
+                  fontSize: 16,
+                  backgroundColor: "#007bff",
+                  color: "white",
+                  border: "none",
                   borderRadius: 8,
-                  cursor: 'pointer'
+                  cursor: "pointer",
                 }}
               >
                 Capture {PHOTO_STEPS[currentStep].title}
@@ -684,24 +714,31 @@ const App = () => {
 
               {/* Progress indicator */}
               <div style={{ marginTop: 16 }}>
-                <div>Progress: {Object.keys(capturedPhotos).length} / {PHOTO_STEPS.length} photos</div>
-                <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+                <div>
+                  Progress: {Object.keys(capturedPhotos).length} /{" "}
+                  {PHOTO_STEPS.length} photos
+                </div>
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                   {PHOTO_STEPS.map((step, index) => (
                     <div
                       key={step.id}
                       style={{
                         width: 40,
                         height: 40,
-                        borderRadius: '50%',
-                        backgroundColor: capturedPhotos[step.id] ? '#28a745' : index === currentStep ? '#007bff' : '#ddd',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        color: 'white',
-                        fontSize: 12
+                        borderRadius: "50%",
+                        backgroundColor: capturedPhotos[step.id]
+                          ? "#28a745"
+                          : index === currentStep
+                          ? "#007bff"
+                          : "#ddd",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        color: "white",
+                        fontSize: 12,
                       }}
                     >
-                      {capturedPhotos[step.id] ? '✓' : index + 1}
+                      {capturedPhotos[step.id] ? "✓" : index + 1}
                     </div>
                   ))}
                 </div>
@@ -710,42 +747,60 @@ const App = () => {
           ) : (
             <div style={{ marginBottom: 24 }}>
               <h3>Photo Sequence Complete! ✅</h3>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 16, marginBottom: 16 }}>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+                  gap: 16,
+                  marginBottom: 16,
+                }}
+              >
                 {Object.entries(capturedPhotos).map(([stepId, imageSrc]) => (
-                  <div key={stepId} style={{ textAlign: 'center' }}>
-                    <img src={imageSrc} alt={stepId} style={{ width: '100%', height: 120, objectFit: 'cover', borderRadius: 8 }} />
-                    <div style={{ fontSize: 12, marginTop: 4 }}>{PHOTO_STEPS.find(s => s.id === stepId)?.title}</div>
+                  <div key={stepId} style={{ textAlign: "center" }}>
+                    <img
+                      src={imageSrc}
+                      alt={stepId}
+                      style={{
+                        width: "100%",
+                        height: 120,
+                        objectFit: "cover",
+                        borderRadius: 8,
+                      }}
+                    />
+                    <div style={{ fontSize: 12, marginTop: 4 }}>
+                      {PHOTO_STEPS.find((s) => s.id === stepId)?.title}
+                    </div>
                   </div>
                 ))}
               </div>
-              
-              <div style={{ display: 'flex', gap: 16 }}>
-                <button 
-                  onClick={processAllPhotos} 
+
+              <div style={{ display: "flex", gap: 16 }}>
+                <button
+                  onClick={processAllPhotos}
                   disabled={processing}
-                  style={{ 
-                    padding: '12px 24px', 
-                    fontSize: 16, 
-                    backgroundColor: '#28a745', 
-                    color: 'white', 
-                    border: 'none', 
+                  style={{
+                    padding: "12px 24px",
+                    fontSize: 16,
+                    backgroundColor: "#28a745",
+                    color: "white",
+                    border: "none",
                     borderRadius: 8,
-                    cursor: 'pointer'
+                    cursor: "pointer",
                   }}
                 >
-                  {processing ? 'Processing...' : 'Calculate Measurements'}
+                  {processing ? "Processing..." : "Calculate Measurements"}
                 </button>
-                
-                <button 
+
+                <button
                   onClick={resetSequence}
-                  style={{ 
-                    padding: '12px 24px', 
-                    fontSize: 16, 
-                    backgroundColor: '#6c757d', 
-                    color: 'white', 
-                    border: 'none', 
+                  style={{
+                    padding: "12px 24px",
+                    fontSize: 16,
+                    backgroundColor: "#6c757d",
+                    color: "white",
+                    border: "none",
                     borderRadius: 8,
-                    cursor: 'pointer'
+                    cursor: "pointer",
                   }}
                 >
                   Retake Photos
@@ -761,7 +816,14 @@ const App = () => {
         <div style={{ marginTop: 24 }}>
           <h2>Your Body Measurements</h2>
           {results.error ? (
-            <div style={{ color: 'red', padding: 16, backgroundColor: '#f8d7da', borderRadius: 8 }}>
+            <div
+              style={{
+                color: "red",
+                padding: 16,
+                backgroundColor: "#f8d7da",
+                borderRadius: 8,
+              }}
+            >
               {results.error}
               {results.errorMessage && (
                 <div style={{ fontSize: 12, marginTop: 8, opacity: 0.7 }}>
@@ -773,100 +835,145 @@ const App = () => {
             <div>
               {/* User Profile Summary */}
               {results.userProfile && (
-                <div style={{ 
-                  padding: 16, 
-                  backgroundColor: '#0E0E0E', 
-                  borderRadius: 8, 
-                  marginBottom: 20,
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(auto-fit, minmax(120px, 1fr))',
-                  gap: 12
-                }}>
-                  <div><strong>Height:</strong> {results.userProfile.height} cm</div>
-                  <div><strong>Weight:</strong> {results.userProfile.weight} kg</div>
-                  <div><strong>Gender:</strong> {results.userProfile.gender}</div>
-                  <div><strong>BMI:</strong> {results.userProfile.bmi}</div>
+                <div
+                  style={{
+                    padding: 16,
+                    backgroundColor: "#0E0E0E",
+                    borderRadius: 8,
+                    marginBottom: 20,
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
+                    gap: 12,
+                  }}
+                >
+                  <div>
+                    <strong>Height:</strong> {results.userProfile.height} cm
+                  </div>
+                  <div>
+                    <strong>Weight:</strong> {results.userProfile.weight} kg
+                  </div>
+                  <div>
+                    <strong>Gender:</strong> {results.userProfile.gender}
+                  </div>
+                  <div>
+                    <strong>BMI:</strong> {results.userProfile.bmi}
+                  </div>
                 </div>
               )}
 
               {/* Canvas with landmarks */}
-              <div style={{ position: 'relative', marginBottom: 20 }}>
+              <div style={{ position: "relative", marginBottom: 20 }}>
                 <canvas
                   ref={canvasRef}
                   width={320}
                   height={400}
-                  style={{ border: '1px solid #ddd', borderRadius: 8, backgroundColor: '#FFFFFF' }}
+                  style={{
+                    border: "1px solid #ddd",
+                    borderRadius: 8,
+                    backgroundColor: "#FFFFFF",
+                  }}
                 />
-                <div style={{ fontSize: 12, color: '#666', marginTop: 4 }}>
+                <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
                   Red dots show detected body landmarks
                 </div>
               </div>
 
               {/* Core Body Measurements */}
               <div style={{ marginBottom: 24 }}>
-                <h3 style={{ color: '#2563eb', borderBottom: '2px solid #2563eb', paddingBottom: 8 }}>
+                <h3
+                  style={{
+                    color: "#2563eb",
+                    borderBottom: "2px solid #2563eb",
+                    paddingBottom: 8,
+                  }}
+                >
                   📏 Core Measurements
                 </h3>
-                <div style={{ display: 'grid', gap: 12, marginTop: 16 }}>
+                <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
                   {renderMeasurementGroup([
-                    { label: 'Shoulder Width', data: results.shoulderWidth },
-                    { label: 'Hip Width', data: results.hipWidth },
-                    { label: 'Waist Width', data: results.waistWidth },
-                    { label: 'Arm Length', data: results.armLength },
-                    { label: 'Leg Length', data: results.legLength },
+                    { label: "Shoulder Width", data: results.shoulderWidth },
+                    { label: "Hip Width", data: results.hipWidth },
+                    { label: "Waist Width", data: results.waistWidth },
+                    { label: "Arm Length", data: results.armLength },
+                    { label: "Leg Length", data: results.legLength },
                   ])}
                 </div>
               </div>
 
               {/* Circumference Measurements */}
               <div style={{ marginBottom: 24 }}>
-                <h3 style={{ color: '#dc2626', borderBottom: '2px solid #dc2626', paddingBottom: 8 }}>
+                <h3
+                  style={{
+                    color: "#dc2626",
+                    borderBottom: "2px solid #dc2626",
+                    paddingBottom: 8,
+                  }}
+                >
                   ⭕ Circumferences (Estimated)
                 </h3>
-                <div style={{ display: 'grid', gap: 12, marginTop: 16 }}>
+                <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
                   {renderMeasurementGroup([
-                    { label: 'Chest Circumference', data: results.chestCircumference },
-                    { label: 'Waist Circumference', data: results.waistCircumference },
-                    { label: 'Hip Circumference', data: results.hipCircumference },
+                    {
+                      label: "Chest Circumference",
+                      data: results.chestCircumference,
+                    },
+                    {
+                      label: "Waist Circumference",
+                      data: results.waistCircumference,
+                    },
+                    {
+                      label: "Hip Circumference",
+                      data: results.hipCircumference,
+                    },
                   ])}
                 </div>
               </div>
 
               {/* Limb Measurements */}
               <div style={{ marginBottom: 24 }}>
-                <h3 style={{ color: '#059669', borderBottom: '2px solid #059669', paddingBottom: 8 }}>
+                <h3
+                  style={{
+                    color: "#059669",
+                    borderBottom: "2px solid #059669",
+                    paddingBottom: 8,
+                  }}
+                >
                   💪 Limb Measurements
                 </h3>
-                <div style={{ display: 'grid', gap: 12, marginTop: 16 }}>
+                <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
                   {renderMeasurementGroup([
-                    { label: 'Biceps Circumference', data: results.biceps },
-                    { label: 'Thigh Circumference', data: results.thigh },
-                    { label: 'Calf Circumference', data: results.calf },
-                    { label: 'Arm Span', data: results.armSpan },
+                    { label: "Biceps Circumference", data: results.biceps },
+                    { label: "Thigh Circumference", data: results.thigh },
+                    { label: "Calf Circumference", data: results.calf },
+                    { label: "Arm Span", data: results.armSpan },
                   ])}
                 </div>
               </div>
 
               {/* Raw Data (Collapsible) */}
               <details style={{ marginTop: 24 }}>
-                <summary style={{ 
-                  cursor: 'pointer', 
-                  padding: 8, 
-                  backgroundColor: '#f3f4f6', 
-                  borderRadius: 4,
-                  fontSize: 14,
-                  color: '#6b7280'
-                }}>
+                <summary
+                  style={{
+                    cursor: "pointer",
+                    padding: 8,
+                    backgroundColor: "#f3f4f6",
+                    borderRadius: 4,
+                    fontSize: 14,
+                    color: "#6b7280",
+                  }}
+                >
                   🔍 View Raw Data (Developer)
                 </summary>
-                <pre style={{ 
-                  backgroundColor: '#0E0E0E', 
-                  padding: 16, 
-                  borderRadius: 8, 
-                  overflow: 'auto',
-                  fontSize: 12,
-                  marginTop: 8
-                }}>
+                <pre
+                  style={{
+                    backgroundColor: "#0E0E0E",
+                    padding: 16,
+                    borderRadius: 8,
+                    overflow: "auto",
+                    fontSize: 12,
+                    marginTop: 8,
+                  }}
+                >
                   {JSON.stringify(results, null, 2)}
                 </pre>
               </details>
