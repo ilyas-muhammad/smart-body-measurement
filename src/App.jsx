@@ -1,99 +1,109 @@
 import React, { useRef, useState } from 'react';
-import Webcam from 'react-webcam';
-import { Pose } from '@mediapipe/pose';
-import { 
-  pixelToCm, 
-  getDistance, 
-  estimateCircumference, 
-  estimateBiceps, 
-  estimateThigh, 
+import Webcam from "react-webcam";
+import {
+  pixelToCm,
+  getDistance,
+  estimateCircumference,
+  estimateBiceps,
+  estimateThigh,
   estimateCalf,
   calculateLandmarkConfidence,
-  getConfidenceDisplay 
-} from './utils/measurement';
+  getConfidenceDisplay,
+} from "./utils/measurement";
 
 const PHOTO_STEPS = [
   {
-    id: 'front',
-    title: 'Front View',
-    instruction: 'Stand facing the camera, arms at your sides',
-    icon: '🧍‍♂️',
-    tips: ['Stand up straight', 'Arms relaxed at sides', 'Look at camera']
+    id: "front",
+    title: "Front View",
+    instruction: "Stand facing the camera, arms at your sides",
+    icon: "🧍‍♂️",
+    tips: ["Stand up straight", "Arms relaxed at sides", "Look at camera"],
   },
   {
-    id: 'side',
-    title: 'Side View', 
-    instruction: 'Turn 90° to your right, maintain same position',
-    icon: '🏃‍♂️',
-    tips: ['Turn right 90°', 'Keep same posture', 'Arms at sides']
+    id: "side",
+    title: "Side View",
+    instruction: "Turn 90° to your right, maintain same position",
+    icon: "🏃‍♂️",
+    tips: ["Turn right 90°", "Keep same posture", "Arms at sides"],
   },
   {
-    id: 'arms_extended',
-    title: 'Arms Extended',
-    instruction: 'Face camera, extend arms sideways (T-pose)',
-    icon: '🤸‍♂️',
-    tips: ['Face the camera', 'Arms straight out', 'Like letter T']
+    id: "arms_extended",
+    title: "Arms Extended",
+    instruction: "Face camera, extend arms sideways (T-pose)",
+    icon: "🤸‍♂️",
+    tips: ["Face the camera", "Arms straight out", "Like letter T"],
   },
   {
-    id: 'legs_apart',
-    title: 'Legs Apart',
-    instruction: 'Stand with feet shoulder-width apart',
-    icon: '🤾‍♂️',
-    tips: ['Feet apart', 'Straight posture', 'Arms at sides']
-  }
+    id: "legs_apart",
+    title: "Legs Apart",
+    instruction: "Stand with feet shoulder-width apart",
+    icon: "🤾‍♂️",
+    tips: ["Feet apart", "Straight posture", "Arms at sides"],
+  },
 ];
 
 // Helper function to render measurement groups (outside component)
 const renderMeasurementGroup = (measurements) => {
-  return measurements.map((item, index) => {
-    if (!item.data) return null;
-    
-    const confidenceColor = {
-      high: '#10b981',
-      medium: '#f59e0b', 
-      low: '#ef4444'
-    }[item.data.confidenceLabel] || '#6b7280';
+  return measurements
+    .map((item, index) => {
+      if (!item.data) return null;
 
-    const confidenceIcon = {
-      high: '✅',
-      medium: '⚠️',
-      low: '❌'
-    }[item.data.confidenceLabel] || '❓';
+      const confidenceColor =
+        {
+          high: "#10b981",
+          medium: "#f59e0b",
+          low: "#ef4444",
+        }[item.data.confidenceLabel] || "#6b7280";
 
-    return (
-      <div
-        key={index}
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          padding: 12,
-          backgroundColor: '#0E0E0E',
-          borderRadius: 6,
-          border: '1px solid #e5e7eb'
-        }}
-      >
-        <div style={{ fontWeight: '500', color: '#FFFFFF' }}>{item.label}</div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span style={{ fontSize: 18, fontWeight: 'bold', color: '#FFFFFF' }}>
-            {item.data.value} {item.data.unit || 'cm'}
-          </span>
-          <span 
-            style={{ 
-              fontSize: 12, 
-              color: confidenceColor,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4
-            }}
-            title={`Confidence: ${item.data.confidencePercentage || 'N/A'}% (${item.data.source})`}
-          >
-            {confidenceIcon} {item.data.confidenceLabel} ({item.data.confidencePercentage || 'N/A'}%)
-          </span>
+      const confidenceIcon =
+        {
+          high: "✅",
+          medium: "⚠️",
+          low: "❌",
+        }[item.data.confidenceLabel] || "❓";
+
+      return (
+        <div
+          key={index}
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            padding: 12,
+            backgroundColor: "#0E0E0E",
+            borderRadius: 6,
+            border: "1px solid #e5e7eb",
+          }}
+        >
+          <div style={{ fontWeight: "500", color: "#FFFFFF" }}>
+            {item.label}
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <span
+              style={{ fontSize: 18, fontWeight: "bold", color: "#FFFFFF" }}
+            >
+              {item.data.value} {item.data.unit || "cm"}
+            </span>
+            <span
+              style={{
+                fontSize: 12,
+                color: confidenceColor,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+              }}
+              title={`Confidence: ${
+                item.data.confidencePercentage || "N/A"
+              }% (${item.data.source})`}
+            >
+              {confidenceIcon} {item.data.confidenceLabel} (
+              {item.data.confidencePercentage || "N/A"}%)
+            </span>
+          </div>
         </div>
-      </div>
-    );
-  }).filter(Boolean);
+      );
+    })
+    .filter(Boolean);
 };
 
 const App = () => {
@@ -141,13 +151,33 @@ const App = () => {
     }
   };
 
-  // Create MediaPipe Pose instance with better error handling
+  // Create MediaPipe Pose instance with better mobile support
   const createPoseInstance = async () => {
     try {
-      // Try multiple CDN sources for better reliability
+      console.log("Starting MediaPipe initialization...");
+
+      // First, try to load MediaPipe dynamically
+      let Pose;
+      try {
+        const mediaPipeModule = await import("@mediapipe/pose");
+        Pose = mediaPipeModule.Pose;
+        console.log("MediaPipe module loaded successfully");
+      } catch (importError) {
+        console.error("Failed to import MediaPipe module:", importError);
+        throw new Error(
+          `MediaPipe module import failed: ${importError.message}`
+        );
+      }
+
+      if (!Pose) {
+        throw new Error("MediaPipe Pose constructor not available");
+      }
+
+      // Try multiple CDN sources and initialization approaches
       const cdnSources = [
         "https://cdn.jsdelivr.net/npm/@mediapipe/pose",
-        "https://unpkg.com/@mediapipe/pose",
+        "https://unpkg.com/@mediapipe/pose@0.5.1675469404",
+        "https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404",
       ];
 
       let pose = null;
@@ -155,9 +185,17 @@ const App = () => {
 
       for (const cdnBase of cdnSources) {
         try {
+          console.log(`Trying CDN: ${cdnBase}`);
+
           pose = new Pose({
-            locateFile: (file) => `${cdnBase}/${file}`,
+            locateFile: (file) => {
+              console.log(`Loading file: ${file} from ${cdnBase}`);
+              return `${cdnBase}/${file}`;
+            },
           });
+
+          // Wait a bit for initialization
+          await new Promise((resolve) => setTimeout(resolve, 100));
 
           // Test if pose can be configured
           pose.setOptions({
@@ -168,9 +206,20 @@ const App = () => {
             minTrackingConfidence: 0.5,
           });
 
-          // If we get here, the pose instance is working
+          console.log("MediaPipe Pose configured successfully");
+
+          // Test with a small canvas to verify it's working
+          const testCanvas = document.createElement("canvas");
+          testCanvas.width = 10;
+          testCanvas.height = 10;
+          const testCtx = testCanvas.getContext("2d");
+          testCtx.fillStyle = "black";
+          testCtx.fillRect(0, 0, 10, 10);
+
+          console.log("MediaPipe Pose instance created successfully");
           break;
         } catch (error) {
+          console.error(`CDN ${cdnBase} failed:`, error);
           lastError = error;
           pose = null;
           continue;
@@ -179,12 +228,15 @@ const App = () => {
 
       if (!pose) {
         throw new Error(
-          `Failed to initialize MediaPipe from all CDN sources. Last error: ${lastError?.message}`
+          `Failed to initialize MediaPipe from all CDN sources. Last error: ${
+            lastError?.message || "Unknown error"
+          }`
         );
       }
 
       return pose;
     } catch (error) {
+      console.error("MediaPipe initialization failed:", error);
       throw new Error(`MediaPipe initialization failed: ${error.message}`);
     }
   };
