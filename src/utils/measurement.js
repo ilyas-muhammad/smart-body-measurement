@@ -86,43 +86,63 @@ export function getConfidenceDisplay(confidenceScore) {
 }
 
 // Calculate biceps circumference from arm measurements
-export function estimateBiceps(landmarks, userProfile, imageSize) {
-  const leftShoulder = landmarks[11];
-  const rightShoulder = landmarks[12];
-  const leftElbow = landmarks[13];
-  const rightElbow = landmarks[14];
-  
-  // Calculate upper arm width (use larger arm for measurement)
-  const leftArmWidth = Math.abs((leftShoulder.x - leftElbow.x) * imageSize.width);
-  const rightArmWidth = Math.abs((rightShoulder.x - rightElbow.x) * imageSize.width);
-  const armWidth = Math.max(leftArmWidth, rightArmWidth);
-  
+export function estimateBiceps(landmarks, userProfile) {
   const ratios = ANTHROPOMETRIC_RATIOS[userProfile.gender];
-  if (!ratios) return { value: 0, confidence: 0, error: 'Invalid gender' };
-  
-  // Convert to real-world measurement (this needs proper scaling)
-  const shoulderWidth = getDistance(
-    { x: leftShoulder.x * imageSize.width, y: leftShoulder.y * imageSize.height },
-    { x: rightShoulder.x * imageSize.width, y: rightShoulder.y * imageSize.height }
-  );
-  
-  // Scale arm width relative to shoulder width
-  const armWidthCm = (armWidth / shoulderWidth) * (userProfile.height * 0.25); // Approximate shoulder width as 25% of height
-  
-  // Apply anthropometric ratio for biceps
+  if (!ratios) return { value: 0, confidence: 0, error: "Invalid gender" };
+
+  // Use anthropometric approach: estimate arm circumference from height and BMI
+  // Typical arm circumference is about 15-20% of height for average BMI
+  const baseArmCirc = userProfile.height * 0.175; // Start with 17.5% of height
+
+  // Adjust for BMI
   const bmiAdjustment = (userProfile.bmi - 22) * ratios.biceps.bmiCoeff;
-  const bicepsCircumference = armWidthCm * ratios.biceps.armWidthRatio * (1 + bmiAdjustment);
-  
-  // Calculate confidence based on landmark visibility and arm pose
-  const armConfidence = calculateLandmarkConfidence(landmarks, [11, 12, 13, 14]);
-  const confidenceDisplay = getConfidenceDisplay(armConfidence * 0.7); // Reduce confidence for estimation
-  
+  const armCircumference = baseArmCirc * (1 + bmiAdjustment);
+
+  // Try to use landmark data for minor adjustments if available
+  let landmarkAdjustment = 1.0;
+  try {
+    const leftShoulder = landmarks[11];
+    const rightShoulder = landmarks[12];
+    const leftElbow = landmarks[13];
+    const rightElbow = landmarks[14];
+
+    if (leftShoulder && rightShoulder && leftElbow && rightElbow) {
+      // Calculate relative arm thickness from pose
+      const leftArmWidth = Math.abs(leftShoulder.x - leftElbow.x);
+      const rightArmWidth = Math.abs(rightShoulder.x - rightElbow.x);
+      const avgArmWidth = (leftArmWidth + rightArmWidth) / 2;
+
+      // Use a small adjustment based on detected arm width (±10% max)
+      const shoulderWidth = Math.abs(leftShoulder.x - rightShoulder.x);
+      if (shoulderWidth > 0) {
+        const armToShoulderRatio = avgArmWidth / shoulderWidth;
+        // Typical ratio is around 0.3-0.5, use this for small adjustments
+        landmarkAdjustment = Math.min(
+          Math.max(armToShoulderRatio / 0.4, 0.9),
+          1.1
+        );
+      }
+    }
+  } catch {
+    // If landmark processing fails, use anthropometric estimate only
+    landmarkAdjustment = 1.0;
+  }
+
+  const finalArmCircumference = armCircumference * landmarkAdjustment;
+
+  // Calculate confidence - lower since we're mostly using estimation
+  const armConfidence = calculateLandmarkConfidence(
+    landmarks,
+    [11, 12, 13, 14]
+  );
+  const confidenceDisplay = getConfidenceDisplay(armConfidence * 0.5); // Lower confidence for estimation
+
   return {
-    value: bicepsCircumference,
+    value: finalArmCircumference,
     confidence: confidenceDisplay.score,
     confidencePercentage: confidenceDisplay.percentage,
     confidenceLabel: confidenceDisplay.label,
-    method: 'arm_width_estimation'
+    method: "anthropometric_with_pose_adjustment",
   };
 }
 

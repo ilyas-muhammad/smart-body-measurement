@@ -27,6 +27,13 @@ const PHOTO_STEPS = [
     tips: ["Turn right 90°", "Keep same posture", "Arms at sides"],
   },
   {
+    id: "back",
+    title: "Back View",
+    instruction: "Turn around, face away from camera, arms at sides",
+    icon: "🚶‍♂️",
+    tips: ["Face away from camera", "Stand up straight", "Arms relaxed"],
+  },
+  {
     id: "arms_extended",
     title: "Arms Extended",
     instruction: "Face camera, extend arms sideways (T-pose)",
@@ -41,6 +48,70 @@ const PHOTO_STEPS = [
     tips: ["Feet apart", "Straight posture", "Arms at sides"],
   },
 ];
+
+// Helper functions for method display and explanations
+const getMethodName = (method) => {
+  const methodNames = {
+    front_view: "Direct Detection",
+    side_view: "Side View Analysis",
+    back_view: "Back View Detection",
+    arms_extended: "Extended Pose",
+    legs_apart: "Wide Stance",
+    front_view_estimated: "Front + Estimation",
+    front_and_side_combined: "Multi-View Combined",
+    anthropometric_with_pose_adjustment: "Body Ratio + Pose",
+    anthropometric_estimate: "Body Proportions",
+    bmi_estimate: "BMI-Based",
+    dual_view: "Dual Camera",
+    estimated_depth: "Depth Estimation",
+    arm_width_estimation: "Arm Analysis",
+    hip_to_thigh_estimation: "Hip-to-Thigh Ratio",
+    thigh_ratio: "Thigh Proportion",
+    direct_estimation: "Direct Calculation",
+  };
+  return methodNames[method] || method;
+};
+
+const getConfidenceExplanation = (data) => {
+  const source = data.source || data.method;
+  const confidence = data.confidenceLabel;
+
+  const explanations = {
+    high: {
+      front_view:
+        "Clear body landmarks detected from front camera with good visibility.",
+      back_view: "Back landmarks clearly visible and accurately positioned.",
+      side_view: "Side profile well-captured with reliable depth information.",
+      default:
+        "Measurement method worked optimally with clear landmark detection.",
+    },
+    medium: {
+      front_view_estimated:
+        "Based on detected landmarks plus anatomical estimation for accuracy.",
+      anthropometric_with_pose_adjustment:
+        "Uses proven body ratios with minor pose-based adjustments.",
+      front_and_side_combined:
+        "Combines multiple camera angles but relies partly on estimation.",
+      default: "Good measurement quality with some estimation involved.",
+    },
+    low: {
+      anthropometric_estimate:
+        "Based purely on height/weight ratios without pose detection.",
+      bmi_estimate:
+        "Calculated from BMI and body proportions - no visual measurement.",
+      estimated_depth:
+        "Limited depth information available from single camera angle.",
+      default:
+        "Measurement relies heavily on statistical body ratios rather than direct detection.",
+    },
+  };
+
+  return (
+    explanations[confidence]?.[source] ||
+    explanations[confidence]?.["default"] ||
+    "Measurement confidence based on detection quality and method reliability."
+  );
+};
 
 // Helper function to render measurement groups (outside component)
 const renderMeasurementGroup = (measurements) => {
@@ -76,29 +147,72 @@ const renderMeasurementGroup = (measurements) => {
           }}
         >
           <div style={{ fontWeight: "500", color: "#FFFFFF" }}>
-            {item.label}
+            <div>{item.labelIdn}</div>
+            <div
+              style={{
+                fontSize: 11,
+                fontStyle: "italic",
+                opacity: 0.7,
+                fontWeight: "normal",
+              }}
+            >
+              {item.labelEng}
+            </div>
           </div>
-          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "flex-end",
+              gap: 4,
+            }}
+          >
             <span
               style={{ fontSize: 18, fontWeight: "bold", color: "#FFFFFF" }}
             >
               {item.data.value} {item.data.unit || "cm"}
             </span>
-            <span
-              style={{
-                fontSize: 12,
-                color: confidenceColor,
-                display: "flex",
-                alignItems: "center",
-                gap: 4,
-              }}
-              title={`Confidence: ${
-                item.data.confidencePercentage || "N/A"
-              }% (${item.data.source})`}
-            >
-              {confidenceIcon} {item.data.confidenceLabel} (
-              {item.data.confidencePercentage || "N/A"}%)
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <span
+                style={{
+                  fontSize: 12,
+                  color: confidenceColor,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
+                }}
+              >
+                {confidenceIcon} {item.data.confidenceLabel} (
+                {item.data.confidencePercentage || "N/A"}%)
+              </span>
+            </div>
+            {item.data.method && (
+              <details
+                style={{ fontSize: 10, color: "#9ca3af", textAlign: "right" }}
+              >
+                <summary style={{ cursor: "pointer", listStyle: "none" }}>
+                  📊 Method & Info
+                </summary>
+                <div
+                  style={{
+                    marginTop: 4,
+                    padding: 8,
+                    backgroundColor: "#1f2937",
+                    borderRadius: 4,
+                    maxWidth: "200px",
+                    textAlign: "left",
+                  }}
+                >
+                  <div style={{ fontWeight: "bold", marginBottom: 4 }}>
+                    Method:{" "}
+                    {getMethodName(item.data.method || item.data.source)}
+                  </div>
+                  <div style={{ fontSize: 9, lineHeight: 1.3 }}>
+                    {getConfidenceExplanation(item.data)}
+                  </div>
+                </div>
+              </details>
+            )}
           </div>
         </div>
       );
@@ -360,6 +474,15 @@ const App = () => {
       Object.assign(measurements, sideMeasurements);
     }
 
+    // Process back view (back measurements)
+    if (processedResults.back) {
+      const backMeasurements = processBackView(
+        processedResults.back.landmarks,
+        userProfile
+      );
+      Object.assign(measurements, backMeasurements);
+    }
+
     // Process arms extended (better arm measurements)
     if (processedResults.arms_extended) {
       const armMeasurements = processArmsExtended(
@@ -492,6 +615,15 @@ const App = () => {
       poseHeight
     );
 
+    // Calculate chest width (different from shoulder width - more focused on chest area)
+    const chestPx = shoulderPx * 0.85; // Chest is typically ~85% of shoulder width
+    const chestWidth = pixelToCm(
+      chestPx,
+      imageSize.height,
+      userProfile.height,
+      poseHeight
+    );
+
     // Calculate confidence scores
     const shoulderConfidence = getConfidenceDisplay(
       calculateLandmarkConfidence(landmarks, [11, 12])
@@ -513,6 +645,14 @@ const App = () => {
         confidencePercentage: shoulderConfidence.percentage,
         confidenceLabel: shoulderConfidence.label,
         source: "front_view",
+        unit: "cm",
+      },
+      chestWidth: {
+        value: chestWidth.toFixed(1),
+        confidence: shoulderConfidence.score * 0.9, // Slightly lower confidence since it's estimated
+        confidencePercentage: Math.round(shoulderConfidence.percentage * 0.9),
+        confidenceLabel: shoulderConfidence.percentage > 70 ? "medium" : "low",
+        source: "front_view_estimated",
         unit: "cm",
       },
       hipWidth: {
@@ -539,12 +679,105 @@ const App = () => {
         source: "front_view",
         unit: "cm",
       },
+      sleeveLength: {
+        value: (armLength * 0.95).toFixed(1), // Sleeve length is typically ~95% of arm length
+        confidence: armConfidence.score * 0.85,
+        confidencePercentage: Math.round(armConfidence.percentage * 0.85),
+        confidenceLabel: armConfidence.percentage > 70 ? "medium" : "low",
+        source: "front_view_estimated",
+        unit: "cm",
+      },
       legLength: {
         value: legLength.toFixed(1),
         confidence: legConfidence.score,
         confidencePercentage: legConfidence.percentage,
         confidenceLabel: legConfidence.label,
         source: "front_view",
+        unit: "cm",
+      },
+      pantsLength: {
+        value: (legLength * 0.92).toFixed(1), // Pants length is typically ~92% of leg length
+        confidence: legConfidence.score * 0.9,
+        confidencePercentage: Math.round(legConfidence.percentage * 0.9),
+        confidenceLabel: legConfidence.percentage > 70 ? "medium" : "low",
+        source: "front_view_estimated",
+        unit: "cm",
+      },
+    };
+  };
+
+  // Process back view measurements
+  const processBackView = (landmarks, userProfile) => {
+    const imageSize = { width: 320, height: 400 };
+
+    // Key landmarks for back view
+    const nose = landmarks[0]; // Head/neck reference point
+    const lShoulder = landmarks[11];
+    const rShoulder = landmarks[12];
+    const lHip = landmarks[23];
+    const rHip = landmarks[24];
+
+    // Calculate back length (neck to waist)
+    // Estimate neck position as slightly above shoulders
+    const neckY = nose.y + (lShoulder.y - nose.y) * 0.8;
+    const waistY = (lShoulder.y + (lHip.y + rHip.y) / 2) / 2; // Waist position using both hips
+
+    const backLengthPx = Math.abs(waistY - neckY) * imageSize.height;
+
+    // Calculate pose height for scaling
+    const lAnkle = landmarks[27];
+    const rAnkle = landmarks[28];
+    const ankle =
+      lAnkle && rAnkle
+        ? lAnkle.y > rAnkle.y
+          ? lAnkle
+          : rAnkle
+        : lAnkle || rAnkle;
+    const poseHeight = Math.abs(nose.y - ankle.y);
+
+    const backLength = pixelToCm(
+      backLengthPx,
+      imageSize.height,
+      userProfile.height,
+      poseHeight
+    );
+
+    // Calculate shoulder blade width (shoulder to shoulder from back)
+    const shoulderBladePx = getDistance(
+      { x: lShoulder.x * imageSize.width, y: lShoulder.y * imageSize.height },
+      { x: rShoulder.x * imageSize.width, y: rShoulder.y * imageSize.height }
+    );
+
+    const shoulderBladeWidth = pixelToCm(
+      shoulderBladePx,
+      imageSize.height,
+      userProfile.height,
+      poseHeight
+    );
+
+    // Calculate confidence scores
+    const backConfidence = getConfidenceDisplay(
+      calculateLandmarkConfidence(landmarks, [0, 11, 12, 23, 24])
+    );
+    const shoulderBladeConfidence = getConfidenceDisplay(
+      calculateLandmarkConfidence(landmarks, [11, 12])
+    );
+
+    return {
+      backLength: {
+        value: backLength.toFixed(1),
+        confidence: backConfidence.score,
+        confidencePercentage: backConfidence.percentage,
+        confidenceLabel: backConfidence.label,
+        source: "back_view",
+        unit: "cm",
+      },
+      shoulderBladeWidth: {
+        value: shoulderBladeWidth.toFixed(1),
+        confidence: shoulderBladeConfidence.score,
+        confidencePercentage: shoulderBladeConfidence.percentage,
+        confidenceLabel: shoulderBladeConfidence.label,
+        source: "back_view",
         unit: "cm",
       },
     };
@@ -600,7 +833,7 @@ const App = () => {
     const imageSize = { width: 320, height: 400 };
 
     // Calculate biceps and arm span
-    const bicepsResult = estimateBiceps(landmarks, userProfile, imageSize);
+    const bicepsResult = estimateBiceps(landmarks, userProfile);
 
     // Calculate arm span (wrist to wrist)
     const leftWrist = landmarks[15];
@@ -1109,7 +1342,7 @@ const App = () => {
                 </div>
               </div>
 
-              {/* Core Body Measurements */}
+              {/* Top Measurements */}
               <div style={{ marginBottom: 24 }}>
                 <h3
                   style={{
@@ -1118,20 +1351,119 @@ const App = () => {
                     paddingBottom: 8,
                   }}
                 >
-                  📏 Core Measurements
+                  👔 Top Measurements
                 </h3>
                 <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
                   {renderMeasurementGroup([
-                    { label: "Shoulder Width", data: results.shoulderWidth },
-                    { label: "Hip Width", data: results.hipWidth },
-                    { label: "Waist Width", data: results.waistWidth },
-                    { label: "Arm Length", data: results.armLength },
-                    { label: "Leg Length", data: results.legLength },
+                    {
+                      labelIdn: "Lebar Bahu",
+                      labelEng: "Shoulder Width",
+                      data: results.shoulderWidth,
+                    },
+                    {
+                      labelIdn: "Lebar Pundak",
+                      labelEng: "Shoulder Blade Width",
+                      data: results.shoulderBladeWidth,
+                    },
+                    {
+                      labelIdn: "Lebar Dada",
+                      labelEng: "Chest Width",
+                      data: results.chestWidth,
+                    },
+                    {
+                      labelIdn: "Lebar Pinggang",
+                      labelEng: "Waist Width",
+                      data: results.waistWidth,
+                    },
+                    {
+                      labelIdn: "Punggung",
+                      labelEng: "Back Length",
+                      data: results.backLength,
+                    },
+                    {
+                      labelIdn: "Panjang Lengan",
+                      labelEng: "Arm Length",
+                      data: results.armLength,
+                    },
+                    {
+                      labelIdn: "Panjang Tangan",
+                      labelEng: "Sleeve Length",
+                      data: results.sleeveLength,
+                    },
+                    {
+                      labelIdn: "Rentang Lengan",
+                      labelEng: "Arm Span",
+                      data: results.armSpan,
+                    },
                   ])}
                 </div>
               </div>
 
-              {/* Circumference Measurements */}
+              {/* Bottom Measurements */}
+              <div style={{ marginBottom: 24 }}>
+                <h3
+                  style={{
+                    color: "#16a34a",
+                    borderBottom: "2px solid #16a34a",
+                    paddingBottom: 8,
+                  }}
+                >
+                  👖 Bottom Measurements
+                </h3>
+                <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
+                  {renderMeasurementGroup([
+                    {
+                      labelIdn: "Lebar Pinggul",
+                      labelEng: "Hip Width",
+                      data: results.hipWidth,
+                    },
+                    {
+                      labelIdn: "Panjang Kaki",
+                      labelEng: "Leg Length",
+                      data: results.legLength,
+                    },
+                    {
+                      labelIdn: "Panjang Celana",
+                      labelEng: "Pants Length",
+                      data: results.pantsLength,
+                    },
+                  ])}
+                </div>
+              </div>
+
+              {/* Top Circumferences */}
+              <div style={{ marginBottom: 24 }}>
+                <h3
+                  style={{
+                    color: "#7c3aed",
+                    borderBottom: "2px solid #7c3aed",
+                    paddingBottom: 8,
+                  }}
+                >
+                  ⭕ Top Circumferences
+                </h3>
+                <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
+                  {renderMeasurementGroup([
+                    {
+                      labelIdn: "Lingkar Dada",
+                      labelEng: "Chest Circumference",
+                      data: results.chestCircumference,
+                    },
+                    {
+                      labelIdn: "Lingkar Perut",
+                      labelEng: "Waist Circumference",
+                      data: results.waistCircumference,
+                    },
+                    {
+                      labelIdn: "Bisep",
+                      labelEng: "Arm Circumference",
+                      data: results.biceps,
+                    },
+                  ])}
+                </div>
+              </div>
+
+              {/* Bottom Circumferences */}
               <div style={{ marginBottom: 24 }}>
                 <h3
                   style={{
@@ -1140,43 +1472,30 @@ const App = () => {
                     paddingBottom: 8,
                   }}
                 >
-                  ⭕ Circumferences (Estimated)
+                  ⭕ Bottom Circumferences
                 </h3>
                 <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
                   {renderMeasurementGroup([
                     {
-                      label: "Chest Circumference",
-                      data: results.chestCircumference,
-                    },
-                    {
-                      label: "Waist Circumference",
+                      labelIdn: "Lingkar Pinggang",
+                      labelEng: "Waist Circumference",
                       data: results.waistCircumference,
                     },
                     {
-                      label: "Hip Circumference",
+                      labelIdn: "Lingkar Pinggul",
+                      labelEng: "Hip Circumference",
                       data: results.hipCircumference,
                     },
-                  ])}
-                </div>
-              </div>
-
-              {/* Limb Measurements */}
-              <div style={{ marginBottom: 24 }}>
-                <h3
-                  style={{
-                    color: "#059669",
-                    borderBottom: "2px solid #059669",
-                    paddingBottom: 8,
-                  }}
-                >
-                  💪 Limb Measurements
-                </h3>
-                <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
-                  {renderMeasurementGroup([
-                    { label: "Biceps Circumference", data: results.biceps },
-                    { label: "Thigh Circumference", data: results.thigh },
-                    { label: "Calf Circumference", data: results.calf },
-                    { label: "Arm Span", data: results.armSpan },
+                    {
+                      labelIdn: "Lingkar Paha",
+                      labelEng: "Thigh Circumference",
+                      data: results.thigh,
+                    },
+                    {
+                      labelIdn: "Lingkar Betis",
+                      labelEng: "Calf Circumference",
+                      data: results.calf,
+                    },
                   ])}
                 </div>
               </div>
