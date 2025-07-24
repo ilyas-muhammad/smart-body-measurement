@@ -1,5 +1,6 @@
 import React, { useRef, useState } from 'react';
 import Webcam from "react-webcam";
+import MeasurementInstructions from "./components/MeasurementInstructions";
 import {
   pixelToCm,
   getDistance,
@@ -10,6 +11,7 @@ import {
   calculateLandmarkConfidence,
   getConfidenceDisplay,
 } from "./utils/measurement";
+import { initializePoseDetection, detectPose } from "./utils/poseDetection";
 
 const PHOTO_STEPS = [
   {
@@ -224,6 +226,9 @@ const App = () => {
   const webcamRef = useRef(null);
   const canvasRef = useRef(null);
 
+  // Add tab state
+  const [activeTab, setActiveTab] = useState("measure");
+
   // User profile
   const [userHeight, setUserHeight] = useState("");
   const [userWeight, setUserWeight] = useState("");
@@ -265,146 +270,44 @@ const App = () => {
     }
   };
 
-  // Create MediaPipe Pose instance with better mobile support
-  const createPoseInstance = async () => {
-    try {
-      console.log("Starting MediaPipe initialization...");
-
-      // First, try to load MediaPipe dynamically
-      let Pose;
-      try {
-        const mediaPipeModule = await import("@mediapipe/pose");
-        Pose = mediaPipeModule.Pose;
-        console.log("MediaPipe module loaded successfully");
-      } catch (importError) {
-        console.error("Failed to import MediaPipe module:", importError);
-        throw new Error(
-          `MediaPipe module import failed: ${importError.message}`
-        );
-      }
-
-      if (!Pose) {
-        throw new Error("MediaPipe Pose constructor not available");
-      }
-
-      // Try multiple CDN sources and initialization approaches
-      const cdnSources = [
-        "https://cdn.jsdelivr.net/npm/@mediapipe/pose",
-        "https://unpkg.com/@mediapipe/pose@0.5.1675469404",
-        "https://cdn.jsdelivr.net/npm/@mediapipe/pose@0.5.1675469404",
-      ];
-
-      let pose = null;
-      let lastError = null;
-
-      for (const cdnBase of cdnSources) {
-        try {
-          console.log(`Trying CDN: ${cdnBase}`);
-
-          pose = new Pose({
-            locateFile: (file) => {
-              console.log(`Loading file: ${file} from ${cdnBase}`);
-              return `${cdnBase}/${file}`;
-            },
-          });
-
-          // Wait a bit for initialization
-          await new Promise((resolve) => setTimeout(resolve, 100));
-
-          // Test if pose can be configured
-          pose.setOptions({
-            modelComplexity: 1,
-            smoothLandmarks: true,
-            enableSegmentation: false,
-            minDetectionConfidence: 0.5,
-            minTrackingConfidence: 0.5,
-          });
-
-          console.log("MediaPipe Pose configured successfully");
-
-          // Test with a small canvas to verify it's working
-          const testCanvas = document.createElement("canvas");
-          testCanvas.width = 10;
-          testCanvas.height = 10;
-          const testCtx = testCanvas.getContext("2d");
-          testCtx.fillStyle = "black";
-          testCtx.fillRect(0, 0, 10, 10);
-
-          console.log("MediaPipe Pose instance created successfully");
-          break;
-        } catch (error) {
-          console.error(`CDN ${cdnBase} failed:`, error);
-          lastError = error;
-          pose = null;
-          continue;
-        }
-      }
-
-      if (!pose) {
-        throw new Error(
-          `Failed to initialize MediaPipe from all CDN sources. Last error: ${
-            lastError?.message || "Unknown error"
-          }`
-        );
-      }
-
-      return pose;
-    } catch (error) {
-      console.error("MediaPipe initialization failed:", error);
-      throw new Error(`MediaPipe initialization failed: ${error.message}`);
-    }
-  };
-
-  // Process all captured photos
+  // Use new pose detection API
   const processAllPhotos = async () => {
     setProcessing(true);
     setResults(null);
 
     try {
       const processedResults = {};
+      // Initialize pose detection (MediaPipe, then TensorFlow.js fallback)
+      const { detector, method } = await initializePoseDetection();
+      console.log(`Using pose detection method: ${method}`);
 
-      // Create pose instance once and reuse
-      const pose = await createPoseInstance();
-
-      // Process each photo with MediaPipe
+      // Process each photo
       for (const [stepId, imageSrc] of Object.entries(capturedPhotos)) {
         try {
           const img = await loadImage(imageSrc);
-
-          // Add timeout to prevent hanging
-          const poseResults = await Promise.race([
-            new Promise((resolve) => {
-              pose.onResults(resolve);
-              pose.send({ image: img });
-            }),
-            new Promise((_, reject) =>
-              setTimeout(
-                () => reject(new Error("MediaPipe processing timeout")),
-                10000
-              )
-            ),
-          ]);
-
+          const poseResults = await detectPose(detector, method, img);
           if (
             poseResults &&
-            poseResults.poseLandmarks &&
-            poseResults.poseLandmarks.length > 0
+            poseResults.landmarks &&
+            poseResults.landmarks.length > 0
           ) {
             processedResults[stepId] = {
-              landmarks: poseResults.poseLandmarks,
+              landmarks: poseResults.landmarks,
               image: img,
               imageSrc: imageSrc,
+              method: poseResults.method,
             };
+            console.log(
+              `Successfully processed ${stepId} using ${poseResults.method}`
+            );
           } else {
             console.warn(`No pose landmarks detected for ${stepId}`);
           }
         } catch (stepError) {
           console.error(`Error processing ${stepId}:`, stepError);
-          // Continue with other photos even if one fails
         }
       }
 
-      // Check if we have any successful results
       if (Object.keys(processedResults).length === 0) {
         throw new Error(
           "No pose landmarks detected in any photos. Please ensure you are clearly visible in the frame and try again."
@@ -1025,511 +928,618 @@ const App = () => {
   // Check if user profile is complete
   const isProfileComplete = userHeight && userWeight && userGender;
 
-  return (
-    <div style={{ maxWidth: 600, margin: "0 auto", padding: 16 }}>
-      <h1>Body Measurement Demo - Multi Photo</h1>
-
-      {/* User Profile Section */}
-      <div
+  // Tab navigation component
+  const TabNavigation = () => (
+    <div
+      style={{
+        display: "flex",
+        marginBottom: "24px",
+        borderBottom: "2px solid #e9ecef",
+      }}
+    >
+      <button
+        onClick={() => setActiveTab("measure")}
         style={{
-          marginBottom: 24,
-          padding: 16,
-          border: "1px solid #ddd",
-          borderRadius: 8,
+          padding: "12px 24px",
+          backgroundColor: activeTab === "measure" ? "#007bff" : "transparent",
+          color: activeTab === "measure" ? "white" : "#007bff",
+          border: "none",
+          borderBottom:
+            activeTab === "measure"
+              ? "2px solid #007bff"
+              : "2px solid transparent",
+          cursor: "pointer",
+          fontSize: "16px",
+          fontWeight: activeTab === "measure" ? "bold" : "normal",
         }}
       >
-        <h3>Your Profile</h3>
-        <div
-          style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 16 }}
-        >
-          <div>
-            <label>Height (cm): </label>
-            <input
-              type="number"
-              value={userHeight}
-              onChange={(e) => setUserHeight(e.target.value)}
-              placeholder="175"
-            />
-          </div>
-          <div>
-            <label>Weight (kg): </label>
-            <input
-              type="number"
-              value={userWeight}
-              onChange={(e) => setUserWeight(e.target.value)}
-              placeholder="70"
-            />
-          </div>
-          <div>
-            <label>Gender: </label>
-            <select
-              value={userGender}
-              onChange={(e) => setUserGender(e.target.value)}
-            >
-              <option value="">Select</option>
-              <option value="male">Male</option>
-              <option value="female">Female</option>
-            </select>
-          </div>
-          <div>
-            <label>Age: </label>
-            <input
-              type="number"
-              value={userAge}
-              onChange={(e) => setUserAge(e.target.value)}
-              placeholder="30"
-            />
-          </div>
-        </div>
-        {userWeight && userHeight && (
-          <div style={{ marginTop: 8, fontSize: 14, color: "#666" }}>
-            BMI:{" "}
-            {(
-              Number(userWeight) / Math.pow(Number(userHeight) / 100, 2)
-            ).toFixed(1)}
-          </div>
-        )}
-      </div>
+        📏 Ambil Pengukuran
+      </button>
+      <button
+        onClick={() => setActiveTab("instructions")}
+        style={{
+          padding: "12px 24px",
+          backgroundColor:
+            activeTab === "instructions" ? "#28a745" : "transparent",
+          color: activeTab === "instructions" ? "white" : "#28a745",
+          border: "none",
+          borderBottom:
+            activeTab === "instructions"
+              ? "2px solid #28a745"
+              : "2px solid transparent",
+          cursor: "pointer",
+          fontSize: "16px",
+          fontWeight: activeTab === "instructions" ? "bold" : "normal",
+        }}
+      >
+        📋 Panduan Pengukuran
+      </button>
+    </div>
+  );
 
-      {!isProfileComplete && (
-        <div
-          style={{
-            padding: 16,
-            backgroundColor: "#E0E0E0",
-            borderRadius: 8,
-            marginBottom: 16,
-            color: "#0E0E0E",
-          }}
-        >
-          Please complete your profile above to continue.
-        </div>
-      )}
+  return (
+    <div style={{ maxWidth: 600, margin: "0 auto", padding: 16 }}>
+      <h1>Demo Pengukuran Tubuh - Multi Foto</h1>
 
-      {/* Photo Sequence Section */}
-      {isProfileComplete && (
+      {/* Tab Navigation */}
+      <TabNavigation />
+
+      {/* Instructions Tab */}
+      {activeTab === "instructions" && <MeasurementInstructions />}
+
+      {/* Measurement Tab */}
+      {activeTab === "measure" && (
         <>
-          {!isSequenceComplete ? (
-            <div style={{ marginBottom: 24 }}>
-              <div style={{ marginBottom: 16 }}>
-                <h3>
-                  Step {currentStep + 1} of {PHOTO_STEPS.length}:{" "}
-                  {PHOTO_STEPS[currentStep].title}
-                </h3>
-                <div style={{ fontSize: 24, marginBottom: 8 }}>
-                  {PHOTO_STEPS[currentStep].icon}
-                </div>
-                <div style={{ fontSize: 18, marginBottom: 8 }}>
-                  {PHOTO_STEPS[currentStep].instruction}
-                </div>
-                <div style={{ fontSize: 14, color: "#666" }}>
-                  Tips: {PHOTO_STEPS[currentStep].tips.join(" • ")}
-                </div>
-              </div>
-
-              <div style={{ position: "relative", marginBottom: 16 }}>
-                <Webcam
-                  audio={false}
-                  ref={webcamRef}
-                  screenshotFormat="image/jpeg"
-                  width={320}
-                  height={400}
-                  videoConstraints={{
-                    facingMode: "environment", // Forces back camera on mobile devices
-                  }}
+          {/* User Profile Section */}
+          <div
+            style={{
+              marginBottom: 24,
+              padding: 16,
+              border: "1px solid #ddd",
+              borderRadius: 8,
+            }}
+          >
+            <h3>Profil Anda</h3>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: 16,
+              }}
+            >
+              <div>
+                <label>Tinggi (cm): </label>
+                <input
+                  type="number"
+                  value={userHeight}
+                  onChange={(e) => setUserHeight(e.target.value)}
+                  placeholder="175"
                 />
               </div>
+              <div>
+                <label>Berat (kg): </label>
+                <input
+                  type="number"
+                  value={userWeight}
+                  onChange={(e) => setUserWeight(e.target.value)}
+                  placeholder="70"
+                />
+              </div>
+              <div>
+                <label>Jenis Kelamin: </label>
+                <select
+                  value={userGender}
+                  onChange={(e) => setUserGender(e.target.value)}
+                >
+                  <option value="">Pilih</option>
+                  <option value="male">Pria</option>
+                  <option value="female">Wanita</option>
+                </select>
+              </div>
+              <div>
+                <label>Umur: </label>
+                <input
+                  type="number"
+                  value={userAge}
+                  onChange={(e) => setUserAge(e.target.value)}
+                  placeholder="30"
+                />
+              </div>
+            </div>
+            {userWeight && userHeight && (
+              <div style={{ marginTop: 8, fontSize: 14, color: "#666" }}>
+                BMI:{" "}
+                {(
+                  Number(userWeight) / Math.pow(Number(userHeight) / 100, 2)
+                ).toFixed(1)}
+              </div>
+            )}
+          </div>
 
+          {/* Quick Clothing Reminder */}
+          {!isProfileComplete && (
+            <div
+              style={{
+                padding: 16,
+                backgroundColor: "#E0E0E0",
+                borderRadius: 8,
+                marginBottom: 16,
+                color: "#0E0E0E",
+              }}
+            >
+              Silakan lengkapi profil Anda di atas untuk melanjutkan.
+            </div>
+          )}
+
+          {isProfileComplete && (
+            <div
+              style={{
+                padding: 12,
+                backgroundColor: "#fff3cd",
+                border: "1px solid #ffeaa7",
+                color: "#0E0E0E",
+                borderRadius: 8,
+                marginBottom: 16,
+                fontSize: 14,
+              }}
+            >
+              <strong>⚡ Pengingat Cepat:</strong> Kenakan pakaian ketat untuk
+              hasil terbaik!
               <button
-                onClick={captureCurrentStep}
+                onClick={() => setActiveTab("instructions")}
                 style={{
-                  padding: "12px 24px",
-                  fontSize: 16,
-                  backgroundColor: "#007bff",
+                  marginLeft: 8,
+                  padding: "4px 8px",
+                  backgroundColor: "#28a745",
                   color: "white",
                   border: "none",
-                  borderRadius: 8,
+                  borderRadius: 4,
+                  fontSize: 12,
                   cursor: "pointer",
                 }}
               >
-                Capture {PHOTO_STEPS[currentStep].title}
+                Lihat Panduan Lengkap
               </button>
-
-              {/* Progress indicator */}
-              <div style={{ marginTop: 16 }}>
-                <div>
-                  Progress: {Object.keys(capturedPhotos).length} /{" "}
-                  {PHOTO_STEPS.length} photos
-                </div>
-                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
-                  {PHOTO_STEPS.map((step, index) => (
-                    <div
-                      key={step.id}
-                      style={{
-                        width: 40,
-                        height: 40,
-                        borderRadius: "50%",
-                        backgroundColor: capturedPhotos[step.id]
-                          ? "#28a745"
-                          : index === currentStep
-                          ? "#007bff"
-                          : "#ddd",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        color: "white",
-                        fontSize: 12,
-                      }}
-                    >
-                      {capturedPhotos[step.id] ? "✓" : index + 1}
-                    </div>
-                  ))}
-                </div>
-              </div>
             </div>
-          ) : (
-            <div style={{ marginBottom: 24 }}>
-              <h3>Photo Sequence Complete! ✅</h3>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-                  gap: 16,
-                  marginBottom: 16,
-                }}
-              >
-                {Object.entries(capturedPhotos).map(([stepId, imageSrc]) => (
-                  <div key={stepId} style={{ textAlign: "center" }}>
-                    <img
-                      src={imageSrc}
-                      alt={stepId}
-                      style={{
-                        width: "100%",
-                        height: 120,
-                        objectFit: "cover",
-                        borderRadius: 8,
-                      }}
-                    />
-                    <div style={{ fontSize: 12, marginTop: 4 }}>
-                      {PHOTO_STEPS.find((s) => s.id === stepId)?.title}
+          )}
+
+          {/* Photo Sequence Section */}
+          {isProfileComplete && (
+            <>
+              {!isSequenceComplete ? (
+                <div style={{ marginBottom: 24 }}>
+                  <div style={{ marginBottom: 16 }}>
+                    <h3>
+                      Step {currentStep + 1} of {PHOTO_STEPS.length}:{" "}
+                      {PHOTO_STEPS[currentStep].title}
+                    </h3>
+                    <div style={{ fontSize: 24, marginBottom: 8 }}>
+                      {PHOTO_STEPS[currentStep].icon}
+                    </div>
+                    <div style={{ fontSize: 18, marginBottom: 8 }}>
+                      {PHOTO_STEPS[currentStep].instruction}
+                    </div>
+                    <div style={{ fontSize: 14, color: "#666" }}>
+                      Tips: {PHOTO_STEPS[currentStep].tips.join(" • ")}
                     </div>
                   </div>
-                ))}
-              </div>
 
-              <div style={{ display: "flex", gap: 16 }}>
-                <button
-                  onClick={processAllPhotos}
-                  disabled={processing}
+                  <div style={{ position: "relative", marginBottom: 16 }}>
+                    <Webcam
+                      audio={false}
+                      ref={webcamRef}
+                      screenshotFormat="image/jpeg"
+                      width={600}
+                      height={600}
+                      videoConstraints={{
+                        facingMode: "environment", // Forces back camera on mobile devices
+                      }}
+                    />
+                  </div>
+
+                  <button
+                    onClick={captureCurrentStep}
+                    style={{
+                      padding: "12px 24px",
+                      fontSize: 16,
+                      backgroundColor: "#007bff",
+                      color: "white",
+                      border: "none",
+                      borderRadius: 8,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Capture {PHOTO_STEPS[currentStep].title}
+                  </button>
+
+                  {/* Progress indicator */}
+                  <div style={{ marginTop: 16 }}>
+                    <div>
+                      Progress: {Object.keys(capturedPhotos).length} /{" "}
+                      {PHOTO_STEPS.length} photos
+                    </div>
+                    <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                      {PHOTO_STEPS.map((step, index) => (
+                        <div
+                          key={step.id}
+                          style={{
+                            width: 40,
+                            height: 40,
+                            borderRadius: "50%",
+                            backgroundColor: capturedPhotos[step.id]
+                              ? "#28a745"
+                              : index === currentStep
+                              ? "#007bff"
+                              : "#ddd",
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            color: "white",
+                            fontSize: 12,
+                          }}
+                        >
+                          {capturedPhotos[step.id] ? "✓" : index + 1}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div style={{ marginBottom: 24 }}>
+                  <h3>Photo Sequence Complete! ✅</h3>
+                  <div
+                    style={{
+                      display: "grid",
+                      gridTemplateColumns:
+                        "repeat(auto-fit, minmax(150px, 1fr))",
+                      gap: 16,
+                      marginBottom: 16,
+                    }}
+                  >
+                    {Object.entries(capturedPhotos).map(
+                      ([stepId, imageSrc]) => (
+                        <div key={stepId} style={{ textAlign: "center" }}>
+                          <img
+                            src={imageSrc}
+                            alt={stepId}
+                            style={{
+                              width: "100%",
+                              height: 120,
+                              objectFit: "cover",
+                              borderRadius: 8,
+                            }}
+                          />
+                          <div style={{ fontSize: 12, marginTop: 4 }}>
+                            {PHOTO_STEPS.find((s) => s.id === stepId)?.title}
+                          </div>
+                        </div>
+                      )
+                    )}
+                  </div>
+
+                  <div style={{ display: "flex", gap: 16 }}>
+                    <button
+                      onClick={processAllPhotos}
+                      disabled={processing}
+                      style={{
+                        padding: "12px 24px",
+                        fontSize: 16,
+                        backgroundColor: "#28a745",
+                        color: "white",
+                        border: "none",
+                        borderRadius: 8,
+                        cursor: "pointer",
+                      }}
+                    >
+                      {processing ? "Processing..." : "Calculate Measurements"}
+                    </button>
+
+                    <button
+                      onClick={resetSequence}
+                      style={{
+                        padding: "12px 24px",
+                        fontSize: 16,
+                        backgroundColor: "#6c757d",
+                        color: "white",
+                        border: "none",
+                        borderRadius: 8,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Retake Photos
+                    </button>
+                  </div>
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Results Section */}
+          {results && (
+            <div style={{ marginTop: 24 }}>
+              <h2>Your Body Measurements</h2>
+              {results.error ? (
+                <div
                   style={{
-                    padding: "12px 24px",
-                    fontSize: 16,
-                    backgroundColor: "#28a745",
-                    color: "white",
-                    border: "none",
+                    color: "red",
+                    padding: 16,
+                    backgroundColor: "#f8d7da",
                     borderRadius: 8,
-                    cursor: "pointer",
                   }}
                 >
-                  {processing ? "Processing..." : "Calculate Measurements"}
-                </button>
+                  <div style={{ fontWeight: "bold", marginBottom: 8 }}>
+                    {results.error}
+                  </div>
+                  {results.errorMessage && (
+                    <div
+                      style={{ fontSize: 12, marginBottom: 12, opacity: 0.7 }}
+                    >
+                      Technical details: {results.errorMessage}
+                    </div>
+                  )}
+                  {results.suggestions && (
+                    <div>
+                      <div
+                        style={{
+                          fontWeight: "bold",
+                          marginBottom: 8,
+                          fontSize: 14,
+                        }}
+                      >
+                        💡 Try these solutions:
+                      </div>
+                      <ul style={{ margin: 0, paddingLeft: 20 }}>
+                        {results.suggestions.map((suggestion, index) => (
+                          <li
+                            key={index}
+                            style={{ marginBottom: 4, fontSize: 13 }}
+                          >
+                            {suggestion}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div>
+                  {/* User Profile Summary */}
+                  {results.userProfile && (
+                    <div
+                      style={{
+                        padding: 16,
+                        backgroundColor: "#0E0E0E",
+                        borderRadius: 8,
+                        marginBottom: 20,
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(auto-fit, minmax(120px, 1fr))",
+                        gap: 12,
+                      }}
+                    >
+                      <div>
+                        <strong>Height:</strong> {results.userProfile.height} cm
+                      </div>
+                      <div>
+                        <strong>Weight:</strong> {results.userProfile.weight} kg
+                      </div>
+                      <div>
+                        <strong>Gender:</strong> {results.userProfile.gender}
+                      </div>
+                      <div>
+                        <strong>BMI:</strong> {results.userProfile.bmi}
+                      </div>
+                    </div>
+                  )}
 
-                <button
-                  onClick={resetSequence}
-                  style={{
-                    padding: "12px 24px",
-                    fontSize: 16,
-                    backgroundColor: "#6c757d",
-                    color: "white",
-                    border: "none",
-                    borderRadius: 8,
-                    cursor: "pointer",
-                  }}
-                >
-                  Retake Photos
-                </button>
-              </div>
+                  {/* Canvas with landmarks */}
+                  <div style={{ position: "relative", marginBottom: 20 }}>
+                    {/* <canvas
+                      ref={canvasRef}
+                      width={320}
+                      height={400}
+                      style={{
+                        border: "1px solid #ddd",
+                        borderRadius: 8,
+                        backgroundColor: "#FFFFFF",
+                      }}
+                    /> */}
+                    {/* <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
+                      Red dots show detected body landmarks
+                    </div> */}
+                  </div>
+
+                  {/* Results sections (existing code for measurements display) */}
+                  {/* Top Measurements */}
+                  <div style={{ marginBottom: 24 }}>
+                    <h3
+                      style={{
+                        color: "#2563eb",
+                        borderBottom: "2px solid #2563eb",
+                        paddingBottom: 8,
+                      }}
+                    >
+                      👔 Top Measurements
+                    </h3>
+                    <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
+                      {renderMeasurementGroup([
+                        {
+                          labelIdn: "Lebar Bahu",
+                          labelEng: "Shoulder Width",
+                          data: results.shoulderWidth,
+                        },
+                        {
+                          labelIdn: "Lebar Pundak",
+                          labelEng: "Shoulder Blade Width",
+                          data: results.shoulderBladeWidth,
+                        },
+                        {
+                          labelIdn: "Lebar Dada",
+                          labelEng: "Chest Width",
+                          data: results.chestWidth,
+                        },
+                        {
+                          labelIdn: "Lebar Pinggang",
+                          labelEng: "Waist Width",
+                          data: results.waistWidth,
+                        },
+                        {
+                          labelIdn: "Punggung",
+                          labelEng: "Back Length",
+                          data: results.backLength,
+                        },
+                        {
+                          labelIdn: "Panjang Lengan",
+                          labelEng: "Arm Length",
+                          data: results.armLength,
+                        },
+                        {
+                          labelIdn: "Panjang Tangan",
+                          labelEng: "Sleeve Length",
+                          data: results.sleeveLength,
+                        },
+                        {
+                          labelIdn: "Rentang Lengan",
+                          labelEng: "Arm Span",
+                          data: results.armSpan,
+                        },
+                      ])}
+                    </div>
+                  </div>
+
+                  {/* Bottom Measurements */}
+                  <div style={{ marginBottom: 24 }}>
+                    <h3
+                      style={{
+                        color: "#16a34a",
+                        borderBottom: "2px solid #16a34a",
+                        paddingBottom: 8,
+                      }}
+                    >
+                      👖 Bottom Measurements
+                    </h3>
+                    <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
+                      {renderMeasurementGroup([
+                        {
+                          labelIdn: "Lebar Pinggul",
+                          labelEng: "Hip Width",
+                          data: results.hipWidth,
+                        },
+                        {
+                          labelIdn: "Panjang Kaki",
+                          labelEng: "Leg Length",
+                          data: results.legLength,
+                        },
+                        {
+                          labelIdn: "Panjang Celana",
+                          labelEng: "Pants Length",
+                          data: results.pantsLength,
+                        },
+                      ])}
+                    </div>
+                  </div>
+
+                  {/* Top Circumferences */}
+                  <div style={{ marginBottom: 24 }}>
+                    <h3
+                      style={{
+                        color: "#7c3aed",
+                        borderBottom: "2px solid #7c3aed",
+                        paddingBottom: 8,
+                      }}
+                    >
+                      ⭕ Top Circumferences
+                    </h3>
+                    <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
+                      {renderMeasurementGroup([
+                        {
+                          labelIdn: "Lingkar Dada",
+                          labelEng: "Chest Circumference",
+                          data: results.chestCircumference,
+                        },
+                        {
+                          labelIdn: "Lingkar Perut",
+                          labelEng: "Waist Circumference",
+                          data: results.waistCircumference,
+                        },
+                        {
+                          labelIdn: "Bisep",
+                          labelEng: "Arm Circumference",
+                          data: results.biceps,
+                        },
+                      ])}
+                    </div>
+                  </div>
+
+                  {/* Bottom Circumferences */}
+                  <div style={{ marginBottom: 24 }}>
+                    <h3
+                      style={{
+                        color: "#dc2626",
+                        borderBottom: "2px solid #dc2626",
+                        paddingBottom: 8,
+                      }}
+                    >
+                      ⭕ Bottom Circumferences
+                    </h3>
+                    <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
+                      {renderMeasurementGroup([
+                        {
+                          labelIdn: "Lingkar Pinggang",
+                          labelEng: "Waist Circumference",
+                          data: results.waistCircumference,
+                        },
+                        {
+                          labelIdn: "Lingkar Pinggul",
+                          labelEng: "Hip Circumference",
+                          data: results.hipCircumference,
+                        },
+                        {
+                          labelIdn: "Lingkar Paha",
+                          labelEng: "Thigh Circumference",
+                          data: results.thigh,
+                        },
+                        {
+                          labelIdn: "Lingkar Betis",
+                          labelEng: "Calf Circumference",
+                          data: results.calf,
+                        },
+                      ])}
+                    </div>
+                  </div>
+
+                  {/* Raw Data (Collapsible) */}
+                  <details style={{ marginTop: 24 }}>
+                    <summary
+                      style={{
+                        cursor: "pointer",
+                        padding: 8,
+                        backgroundColor: "#f3f4f6",
+                        borderRadius: 4,
+                        fontSize: 14,
+                        color: "#6b7280",
+                      }}
+                    >
+                      🔍 View Raw Data (Developer)
+                    </summary>
+                    <pre
+                      style={{
+                        backgroundColor: "#0E0E0E",
+                        padding: 16,
+                        borderRadius: 8,
+                        overflow: "auto",
+                        fontSize: 12,
+                        marginTop: 8,
+                      }}
+                    >
+                      {JSON.stringify(results, null, 2)}
+                    </pre>
+                  </details>
+                </div>
+              )}
             </div>
           )}
         </>
-      )}
-
-      {/* Results Section */}
-      {results && (
-        <div style={{ marginTop: 24 }}>
-          <h2>Your Body Measurements</h2>
-          {results.error ? (
-            <div
-              style={{
-                color: "red",
-                padding: 16,
-                backgroundColor: "#f8d7da",
-                borderRadius: 8,
-              }}
-            >
-              <div style={{ fontWeight: "bold", marginBottom: 8 }}>
-                {results.error}
-              </div>
-              {results.errorMessage && (
-                <div style={{ fontSize: 12, marginBottom: 12, opacity: 0.7 }}>
-                  Technical details: {results.errorMessage}
-                </div>
-              )}
-              {results.suggestions && (
-                <div>
-                  <div
-                    style={{
-                      fontWeight: "bold",
-                      marginBottom: 8,
-                      fontSize: 14,
-                    }}
-                  >
-                    💡 Try these solutions:
-                  </div>
-                  <ul style={{ margin: 0, paddingLeft: 20 }}>
-                    {results.suggestions.map((suggestion, index) => (
-                      <li key={index} style={{ marginBottom: 4, fontSize: 13 }}>
-                        {suggestion}
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div>
-              {/* User Profile Summary */}
-              {results.userProfile && (
-                <div
-                  style={{
-                    padding: 16,
-                    backgroundColor: "#0E0E0E",
-                    borderRadius: 8,
-                    marginBottom: 20,
-                    display: "grid",
-                    gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))",
-                    gap: 12,
-                  }}
-                >
-                  <div>
-                    <strong>Height:</strong> {results.userProfile.height} cm
-                  </div>
-                  <div>
-                    <strong>Weight:</strong> {results.userProfile.weight} kg
-                  </div>
-                  <div>
-                    <strong>Gender:</strong> {results.userProfile.gender}
-                  </div>
-                  <div>
-                    <strong>BMI:</strong> {results.userProfile.bmi}
-                  </div>
-                </div>
-              )}
-
-              {/* Canvas with landmarks */}
-              <div style={{ position: "relative", marginBottom: 20 }}>
-                <canvas
-                  ref={canvasRef}
-                  width={320}
-                  height={400}
-                  style={{
-                    border: "1px solid #ddd",
-                    borderRadius: 8,
-                    backgroundColor: "#FFFFFF",
-                  }}
-                />
-                <div style={{ fontSize: 12, color: "#666", marginTop: 4 }}>
-                  Red dots show detected body landmarks
-                </div>
-              </div>
-
-              {/* Top Measurements */}
-              <div style={{ marginBottom: 24 }}>
-                <h3
-                  style={{
-                    color: "#2563eb",
-                    borderBottom: "2px solid #2563eb",
-                    paddingBottom: 8,
-                  }}
-                >
-                  👔 Top Measurements
-                </h3>
-                <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
-                  {renderMeasurementGroup([
-                    {
-                      labelIdn: "Lebar Bahu",
-                      labelEng: "Shoulder Width",
-                      data: results.shoulderWidth,
-                    },
-                    {
-                      labelIdn: "Lebar Pundak",
-                      labelEng: "Shoulder Blade Width",
-                      data: results.shoulderBladeWidth,
-                    },
-                    {
-                      labelIdn: "Lebar Dada",
-                      labelEng: "Chest Width",
-                      data: results.chestWidth,
-                    },
-                    {
-                      labelIdn: "Lebar Pinggang",
-                      labelEng: "Waist Width",
-                      data: results.waistWidth,
-                    },
-                    {
-                      labelIdn: "Punggung",
-                      labelEng: "Back Length",
-                      data: results.backLength,
-                    },
-                    {
-                      labelIdn: "Panjang Lengan",
-                      labelEng: "Arm Length",
-                      data: results.armLength,
-                    },
-                    {
-                      labelIdn: "Panjang Tangan",
-                      labelEng: "Sleeve Length",
-                      data: results.sleeveLength,
-                    },
-                    {
-                      labelIdn: "Rentang Lengan",
-                      labelEng: "Arm Span",
-                      data: results.armSpan,
-                    },
-                  ])}
-                </div>
-              </div>
-
-              {/* Bottom Measurements */}
-              <div style={{ marginBottom: 24 }}>
-                <h3
-                  style={{
-                    color: "#16a34a",
-                    borderBottom: "2px solid #16a34a",
-                    paddingBottom: 8,
-                  }}
-                >
-                  👖 Bottom Measurements
-                </h3>
-                <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
-                  {renderMeasurementGroup([
-                    {
-                      labelIdn: "Lebar Pinggul",
-                      labelEng: "Hip Width",
-                      data: results.hipWidth,
-                    },
-                    {
-                      labelIdn: "Panjang Kaki",
-                      labelEng: "Leg Length",
-                      data: results.legLength,
-                    },
-                    {
-                      labelIdn: "Panjang Celana",
-                      labelEng: "Pants Length",
-                      data: results.pantsLength,
-                    },
-                  ])}
-                </div>
-              </div>
-
-              {/* Top Circumferences */}
-              <div style={{ marginBottom: 24 }}>
-                <h3
-                  style={{
-                    color: "#7c3aed",
-                    borderBottom: "2px solid #7c3aed",
-                    paddingBottom: 8,
-                  }}
-                >
-                  ⭕ Top Circumferences
-                </h3>
-                <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
-                  {renderMeasurementGroup([
-                    {
-                      labelIdn: "Lingkar Dada",
-                      labelEng: "Chest Circumference",
-                      data: results.chestCircumference,
-                    },
-                    {
-                      labelIdn: "Lingkar Perut",
-                      labelEng: "Waist Circumference",
-                      data: results.waistCircumference,
-                    },
-                    {
-                      labelIdn: "Bisep",
-                      labelEng: "Arm Circumference",
-                      data: results.biceps,
-                    },
-                  ])}
-                </div>
-              </div>
-
-              {/* Bottom Circumferences */}
-              <div style={{ marginBottom: 24 }}>
-                <h3
-                  style={{
-                    color: "#dc2626",
-                    borderBottom: "2px solid #dc2626",
-                    paddingBottom: 8,
-                  }}
-                >
-                  ⭕ Bottom Circumferences
-                </h3>
-                <div style={{ display: "grid", gap: 12, marginTop: 16 }}>
-                  {renderMeasurementGroup([
-                    {
-                      labelIdn: "Lingkar Pinggang",
-                      labelEng: "Waist Circumference",
-                      data: results.waistCircumference,
-                    },
-                    {
-                      labelIdn: "Lingkar Pinggul",
-                      labelEng: "Hip Circumference",
-                      data: results.hipCircumference,
-                    },
-                    {
-                      labelIdn: "Lingkar Paha",
-                      labelEng: "Thigh Circumference",
-                      data: results.thigh,
-                    },
-                    {
-                      labelIdn: "Lingkar Betis",
-                      labelEng: "Calf Circumference",
-                      data: results.calf,
-                    },
-                  ])}
-                </div>
-              </div>
-
-              {/* Raw Data (Collapsible) */}
-              <details style={{ marginTop: 24 }}>
-                <summary
-                  style={{
-                    cursor: "pointer",
-                    padding: 8,
-                    backgroundColor: "#f3f4f6",
-                    borderRadius: 4,
-                    fontSize: 14,
-                    color: "#6b7280",
-                  }}
-                >
-                  🔍 View Raw Data (Developer)
-                </summary>
-                <pre
-                  style={{
-                    backgroundColor: "#0E0E0E",
-                    padding: 16,
-                    borderRadius: 8,
-                    overflow: "auto",
-                    fontSize: 12,
-                    marginTop: 8,
-                  }}
-                >
-                  {JSON.stringify(results, null, 2)}
-                </pre>
-              </details>
-            </div>
-          )}
-        </div>
       )}
     </div>
   );
