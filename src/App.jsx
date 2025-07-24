@@ -1,17 +1,7 @@
 import React, { useRef, useState } from 'react';
 import Webcam from "react-webcam";
 import MeasurementInstructions from "./components/MeasurementInstructions";
-import {
-  pixelToCm,
-  getDistance,
-  estimateCircumference,
-  estimateBiceps,
-  estimateThigh,
-  estimateCalf,
-  calculateLandmarkConfidence,
-  getConfidenceDisplay,
-} from "./utils/measurement";
-import { initializePoseDetection, detectPose } from "./utils/poseDetection";
+import useMeasurementProcessing from "./hooks/useMeasurementProcessing";
 
 const PHOTO_STEPS = [
   {
@@ -224,7 +214,7 @@ const renderMeasurementGroup = (measurements) => {
 
 const App = () => {
   const webcamRef = useRef(null);
-  const canvasRef = useRef(null);
+  // const canvasRef = useRef(null);
 
   // Add tab state
   const [activeTab, setActiveTab] = useState("measure");
@@ -239,8 +229,14 @@ const App = () => {
   const [currentStep, setCurrentStep] = useState(0);
   const [capturedPhotos, setCapturedPhotos] = useState({});
   const [isSequenceComplete, setIsSequenceComplete] = useState(false);
-  const [processing, setProcessing] = useState(false);
-  const [results, setResults] = useState(null);
+
+  // Use the new measurement processing hook
+  const {
+    processAll,
+    results,
+    processing,
+    error: processingError,
+  } = useMeasurementProcessing();
 
   // Helper to load image as HTMLImageElement
   const loadImage = (src) => {
@@ -270,663 +266,35 @@ const App = () => {
     }
   };
 
-  // Use new pose detection API
-  const processAllPhotos = async () => {
-    setProcessing(true);
-    setResults(null);
-
-    try {
-      const processedResults = {};
-      // Initialize pose detection (MediaPipe, then TensorFlow.js fallback)
-      const { detector, method } = await initializePoseDetection();
-      console.log(`Using pose detection method: ${method}`);
-
-      // Process each photo
-      for (const [stepId, imageSrc] of Object.entries(capturedPhotos)) {
-        try {
-          const img = await loadImage(imageSrc);
-          const poseResults = await detectPose(detector, method, img);
-          if (
-            poseResults &&
-            poseResults.landmarks &&
-            poseResults.landmarks.length > 0
-          ) {
-            processedResults[stepId] = {
-              landmarks: poseResults.landmarks,
-              image: img,
-              imageSrc: imageSrc,
-              method: poseResults.method,
-            };
-            console.log(
-              `Successfully processed ${stepId} using ${poseResults.method}`
-            );
-          } else {
-            console.warn(`No pose landmarks detected for ${stepId}`);
-          }
-        } catch (stepError) {
-          console.error(`Error processing ${stepId}:`, stepError);
-        }
-      }
-
-      if (Object.keys(processedResults).length === 0) {
-        throw new Error(
-          "No pose landmarks detected in any photos. Please ensure you are clearly visible in the frame and try again."
-        );
-      }
-
-      // Calculate measurements from multiple angles
-      const measurements = calculateMultiAngleMeasurements(processedResults);
-      setResults(measurements);
-
-      // Draw landmarks on the current displayed image
-      if (processedResults.front) {
-        drawLandmarks(
-          processedResults.front.landmarks,
-          processedResults.front.imageSrc
-        );
-      }
-    } catch (error) {
-      console.error("Processing error:", error);
-      setResults({
-        error: "Processing failed. Please try again.",
-        errorMessage: error.message,
-        suggestions: [
-          "Ensure you have a stable internet connection",
-          "Make sure you are clearly visible in all photos",
-          "Try refreshing the page and taking new photos",
-          "Check that your device camera is working properly",
-        ],
-      });
-    }
-
-    setProcessing(false);
-  };
-
-  // Calculate measurements using multiple photo angles
-  const calculateMultiAngleMeasurements = (processedResults) => {
-    const userProfile = {
-      height: Number(userHeight),
-      weight: Number(userWeight),
-      gender: userGender,
-      age: Number(userAge),
-      bmi:
-        userWeight && userHeight
-          ? (
-              Number(userWeight) / Math.pow(Number(userHeight) / 100, 2)
-            ).toFixed(1)
-          : null,
-    };
-
-    const measurements = {};
-
-    // Process front view (core measurements)
-    if (processedResults.front) {
-      const frontMeasurements = processFrontView(
-        processedResults.front.landmarks,
-        userProfile
-      );
-      Object.assign(measurements, frontMeasurements);
-    }
-
-    // Process side view (depth measurements)
-    if (processedResults.side) {
-      const sideMeasurements = processSideView(
-        processedResults.side.landmarks,
-        userProfile
-      );
-      Object.assign(measurements, sideMeasurements);
-    }
-
-    // Process back view (back measurements)
-    if (processedResults.back) {
-      const backMeasurements = processBackView(
-        processedResults.back.landmarks,
-        userProfile
-      );
-      Object.assign(measurements, backMeasurements);
-    }
-
-    // Process arms extended (better arm measurements)
-    if (processedResults.arms_extended) {
-      const armMeasurements = processArmsExtended(
-        processedResults.arms_extended.landmarks,
-        userProfile
-      );
-      Object.assign(measurements, armMeasurements);
-    }
-
-    // Process legs apart (better leg measurements)
-    if (processedResults.legs_apart) {
-      const legMeasurements = processLegsApart(
-        processedResults.legs_apart.landmarks,
-        userProfile
-      );
-      Object.assign(measurements, legMeasurements);
-    }
-
-    // Combine measurements for circumferences
-    if (processedResults.front && processedResults.side) {
-      const circumferences = calculateCircumferences(
-        processedResults.front.landmarks,
-        processedResults.side.landmarks,
-        userProfile
-      );
-      Object.assign(measurements, circumferences);
-    }
-
-    return { ...measurements, userProfile };
-  };
-
-  // Process front view measurements
-  const processFrontView = (landmarks, userProfile) => {
-    const imageSize = { width: 320, height: 400 };
-
-    // Key landmarks
-    const lShoulder = landmarks[11];
-    const rShoulder = landmarks[12];
-    // const lElbow = landmarks[13];
-    // const rElbow = landmarks[14];
-    const lWrist = landmarks[15];
-    const rWrist = landmarks[16];
-    const lHip = landmarks[23];
-    const rHip = landmarks[24];
-    // const lKnee = landmarks[25];
-    // const rKnee = landmarks[26];
-    const lAnkle = landmarks[27];
-    const rAnkle = landmarks[28];
-    const top = landmarks[0]; // Nose/head
-
-    // Calculate pose height for scaling
-    const ankle =
-      lAnkle && rAnkle
-        ? lAnkle.y > rAnkle.y
-          ? lAnkle
-          : rAnkle
-        : lAnkle || rAnkle;
-    const poseHeight = Math.abs(top.y - ankle.y);
-
-    // Calculate pixel distances
-    const shoulderPx = getDistance(
-      { x: lShoulder.x * imageSize.width, y: lShoulder.y * imageSize.height },
-      { x: rShoulder.x * imageSize.width, y: rShoulder.y * imageSize.height }
-    );
-
-    const hipPx = getDistance(
-      { x: lHip.x * imageSize.width, y: lHip.y * imageSize.height },
-      { x: rHip.x * imageSize.width, y: rHip.y * imageSize.height }
-    );
-
-    // Estimate waist position (between chest and hips)
-    // const waistY = (lShoulder.y + lHip.y) / 2;
-    const waistPx = shoulderPx * 0.8; // Approximate waist as 80% of shoulder width
-
-    // Arm length (shoulder to wrist)
-    const leftArmPx = getDistance(
-      { x: lShoulder.x * imageSize.width, y: lShoulder.y * imageSize.height },
-      { x: lWrist.x * imageSize.width, y: lWrist.y * imageSize.height }
-    );
-
-    const rightArmPx = getDistance(
-      { x: rShoulder.x * imageSize.width, y: rShoulder.y * imageSize.height },
-      { x: rWrist.x * imageSize.width, y: rWrist.y * imageSize.height }
-    );
-
-    const armLengthPx = Math.max(leftArmPx, rightArmPx);
-
-    // Leg length (hip to ankle)
-    const leftLegPx = getDistance(
-      { x: lHip.x * imageSize.width, y: lHip.y * imageSize.height },
-      { x: lAnkle.x * imageSize.width, y: lAnkle.y * imageSize.height }
-    );
-
-    const rightLegPx = getDistance(
-      { x: rHip.x * imageSize.width, y: rHip.y * imageSize.height },
-      { x: rAnkle.x * imageSize.width, y: rAnkle.y * imageSize.height }
-    );
-
-    const legLengthPx = Math.max(leftLegPx, rightLegPx);
-
-    // Convert to cm
-    const shoulderWidth = pixelToCm(
-      shoulderPx,
-      imageSize.height,
-      userProfile.height,
-      poseHeight
-    );
-    const hipWidth = pixelToCm(
-      hipPx,
-      imageSize.height,
-      userProfile.height,
-      poseHeight
-    );
-    const waistWidth = pixelToCm(
-      waistPx,
-      imageSize.height,
-      userProfile.height,
-      poseHeight
-    );
-    const armLength = pixelToCm(
-      armLengthPx,
-      imageSize.height,
-      userProfile.height,
-      poseHeight
-    );
-    const legLength = pixelToCm(
-      legLengthPx,
-      imageSize.height,
-      userProfile.height,
-      poseHeight
-    );
-
-    // Calculate chest width (different from shoulder width - more focused on chest area)
-    const chestPx = shoulderPx * 0.85; // Chest is typically ~85% of shoulder width
-    const chestWidth = pixelToCm(
-      chestPx,
-      imageSize.height,
-      userProfile.height,
-      poseHeight
-    );
-
-    // Calculate confidence scores
-    const shoulderConfidence = getConfidenceDisplay(
-      calculateLandmarkConfidence(landmarks, [11, 12])
-    );
-    const hipConfidence = getConfidenceDisplay(
-      calculateLandmarkConfidence(landmarks, [23, 24])
-    );
-    const armConfidence = getConfidenceDisplay(
-      calculateLandmarkConfidence(landmarks, [11, 12, 15, 16])
-    );
-    const legConfidence = getConfidenceDisplay(
-      calculateLandmarkConfidence(landmarks, [23, 24, 27, 28])
-    );
-
-    return {
-      shoulderWidth: {
-        value: shoulderWidth.toFixed(1),
-        confidence: shoulderConfidence.score,
-        confidencePercentage: shoulderConfidence.percentage,
-        confidenceLabel: shoulderConfidence.label,
-        source: "front_view",
-        unit: "cm",
-      },
-      chestWidth: {
-        value: chestWidth.toFixed(1),
-        confidence: shoulderConfidence.score * 0.9, // Slightly lower confidence since it's estimated
-        confidencePercentage: Math.round(shoulderConfidence.percentage * 0.9),
-        confidenceLabel: shoulderConfidence.percentage > 70 ? "medium" : "low",
-        source: "front_view_estimated",
-        unit: "cm",
-      },
-      hipWidth: {
-        value: hipWidth.toFixed(1),
-        confidence: hipConfidence.score,
-        confidencePercentage: hipConfidence.percentage,
-        confidenceLabel: hipConfidence.label,
-        source: "front_view",
-        unit: "cm",
-      },
-      waistWidth: {
-        value: waistWidth.toFixed(1),
-        confidence: 0.6,
-        confidencePercentage: 60,
-        confidenceLabel: "medium",
-        source: "front_view_estimated",
-        unit: "cm",
-      },
-      armLength: {
-        value: armLength.toFixed(1),
-        confidence: armConfidence.score,
-        confidencePercentage: armConfidence.percentage,
-        confidenceLabel: armConfidence.label,
-        source: "front_view",
-        unit: "cm",
-      },
-      sleeveLength: {
-        value: (armLength * 0.95).toFixed(1), // Sleeve length is typically ~95% of arm length
-        confidence: armConfidence.score * 0.85,
-        confidencePercentage: Math.round(armConfidence.percentage * 0.85),
-        confidenceLabel: armConfidence.percentage > 70 ? "medium" : "low",
-        source: "front_view_estimated",
-        unit: "cm",
-      },
-      legLength: {
-        value: legLength.toFixed(1),
-        confidence: legConfidence.score,
-        confidencePercentage: legConfidence.percentage,
-        confidenceLabel: legConfidence.label,
-        source: "front_view",
-        unit: "cm",
-      },
-      pantsLength: {
-        value: (legLength * 0.92).toFixed(1), // Pants length is typically ~92% of leg length
-        confidence: legConfidence.score * 0.9,
-        confidencePercentage: Math.round(legConfidence.percentage * 0.9),
-        confidenceLabel: legConfidence.percentage > 70 ? "medium" : "low",
-        source: "front_view_estimated",
-        unit: "cm",
-      },
-    };
-  };
-
-  // Process back view measurements
-  const processBackView = (landmarks, userProfile) => {
-    const imageSize = { width: 320, height: 400 };
-
-    // Key landmarks for back view
-    const nose = landmarks[0]; // Head/neck reference point
-    const lShoulder = landmarks[11];
-    const rShoulder = landmarks[12];
-    const lHip = landmarks[23];
-    const rHip = landmarks[24];
-
-    // Calculate back length (neck to waist)
-    // Estimate neck position as slightly above shoulders
-    const neckY = nose.y + (lShoulder.y - nose.y) * 0.8;
-    const waistY = (lShoulder.y + (lHip.y + rHip.y) / 2) / 2; // Waist position using both hips
-
-    const backLengthPx = Math.abs(waistY - neckY) * imageSize.height;
-
-    // Calculate pose height for scaling
-    const lAnkle = landmarks[27];
-    const rAnkle = landmarks[28];
-    const ankle =
-      lAnkle && rAnkle
-        ? lAnkle.y > rAnkle.y
-          ? lAnkle
-          : rAnkle
-        : lAnkle || rAnkle;
-    const poseHeight = Math.abs(nose.y - ankle.y);
-
-    const backLength = pixelToCm(
-      backLengthPx,
-      imageSize.height,
-      userProfile.height,
-      poseHeight
-    );
-
-    // Calculate shoulder blade width (shoulder to shoulder from back)
-    const shoulderBladePx = getDistance(
-      { x: lShoulder.x * imageSize.width, y: lShoulder.y * imageSize.height },
-      { x: rShoulder.x * imageSize.width, y: rShoulder.y * imageSize.height }
-    );
-
-    const shoulderBladeWidth = pixelToCm(
-      shoulderBladePx,
-      imageSize.height,
-      userProfile.height,
-      poseHeight
-    );
-
-    // Calculate confidence scores
-    const backConfidence = getConfidenceDisplay(
-      calculateLandmarkConfidence(landmarks, [0, 11, 12, 23, 24])
-    );
-    const shoulderBladeConfidence = getConfidenceDisplay(
-      calculateLandmarkConfidence(landmarks, [11, 12])
-    );
-
-    return {
-      backLength: {
-        value: backLength.toFixed(1),
-        confidence: backConfidence.score,
-        confidencePercentage: backConfidence.percentage,
-        confidenceLabel: backConfidence.label,
-        source: "back_view",
-        unit: "cm",
-      },
-      shoulderBladeWidth: {
-        value: shoulderBladeWidth.toFixed(1),
-        confidence: shoulderBladeConfidence.score,
-        confidencePercentage: shoulderBladeConfidence.percentage,
-        confidenceLabel: shoulderBladeConfidence.label,
-        source: "back_view",
-        unit: "cm",
-      },
-    };
-  };
-
-  // Process side view measurements
-  const processSideView = (landmarks) => {
-    const imageSize = { width: 320, height: 400 };
-
-    // Get depth measurements from side view
-    // const nose = landmarks[0];
-    const leftShoulder = landmarks[11];
-    const rightShoulder = landmarks[12];
-    const leftHip = landmarks[23];
-    const rightHip = landmarks[24];
-
-    // Calculate depth (front to back) measurements
-    // In side view, the x-axis represents depth
-    const shoulderDepth =
-      Math.abs(leftShoulder.x - rightShoulder.x) * imageSize.width;
-    const hipDepth = Math.abs(leftHip.x - rightHip.x) * imageSize.width;
-
-    // Estimate chest depth (slightly more than shoulder)
-    const chestDepth = shoulderDepth * 1.1;
-
-    // Estimate waist depth (between chest and hip)
-    const waistDepth = (chestDepth + hipDepth) / 2;
-
-    return {
-      chestDepth: {
-        value: chestDepth.toFixed(1),
-        confidence: "medium",
-        source: "side_view",
-        unit: "pixels",
-      },
-      waistDepth: {
-        value: waistDepth.toFixed(1),
-        confidence: "medium",
-        source: "side_view",
-        unit: "pixels",
-      },
-      hipDepth: {
-        value: hipDepth.toFixed(1),
-        confidence: "medium",
-        source: "side_view",
-        unit: "pixels",
-      },
-    };
-  };
-
-  // Process arms extended measurements
-  const processArmsExtended = (landmarks, userProfile) => {
-    const imageSize = { width: 320, height: 400 };
-
-    // Calculate biceps and arm span
-    const bicepsResult = estimateBiceps(landmarks, userProfile);
-
-    // Calculate arm span (wrist to wrist)
-    const leftWrist = landmarks[15];
-    const rightWrist = landmarks[16];
-
-    if (leftWrist && rightWrist) {
-      const armSpanPx = getDistance(
-        { x: leftWrist.x * imageSize.width, y: leftWrist.y * imageSize.height },
-        {
-          x: rightWrist.x * imageSize.width,
-          y: rightWrist.y * imageSize.height,
-        }
-      );
-
-      // Convert to cm (using approximate scaling)
-      const armSpanCm =
-        (armSpanPx / imageSize.width) * userProfile.height * 1.1; // Arm span ≈ height
-      const armSpanConfidence = getConfidenceDisplay(
-        calculateLandmarkConfidence(landmarks, [15, 16]) * 0.9
-      );
-
-      return {
-        biceps: {
-          value: bicepsResult.value.toFixed(1),
-          confidence: bicepsResult.confidence,
-          confidencePercentage: bicepsResult.confidencePercentage,
-          confidenceLabel: bicepsResult.confidenceLabel,
-          source: "arms_extended",
-          unit: "cm",
-        },
-        armSpan: {
-          value: armSpanCm.toFixed(1),
-          confidence: armSpanConfidence.score,
-          confidencePercentage: armSpanConfidence.percentage,
-          confidenceLabel: armSpanConfidence.label,
-          source: "arms_extended",
-          unit: "cm",
-        },
-      };
-    }
-
-    return {
-      biceps: {
-        value: bicepsResult.value.toFixed(1),
-        confidence: bicepsResult.confidence,
-        confidencePercentage: bicepsResult.confidencePercentage,
-        confidenceLabel: bicepsResult.confidenceLabel,
-        source: "arms_extended",
-        unit: "cm",
-      },
-    };
-  };
-
-  // Process legs apart measurements
-  const processLegsApart = (landmarks, userProfile) => {
-    const imageSize = { width: 320, height: 400 };
-
-    // Calculate thigh and calf measurements
-    const thighResult = estimateThigh(landmarks, userProfile, imageSize);
-    const calfResult = estimateCalf(
-      landmarks,
-      userProfile,
-      imageSize,
-      thighResult
-    );
-
-    return {
-      thigh: {
-        value: thighResult.value.toFixed(1),
-        confidence: thighResult.confidence,
-        confidencePercentage: thighResult.confidencePercentage,
-        confidenceLabel: thighResult.confidenceLabel,
-        source: "legs_apart",
-        unit: "cm",
-      },
-      calf: {
-        value: calfResult.value.toFixed(1),
-        confidence: calfResult.confidence,
-        confidencePercentage: calfResult.confidencePercentage,
-        confidenceLabel: calfResult.confidenceLabel,
-        source: "legs_apart",
-        unit: "cm",
-      },
-    };
-  };
-
-  // Calculate circumferences using front and side data
-  const calculateCircumferences = (
-    frontLandmarks,
-    sideLandmarks,
-    userProfile
-  ) => {
-    // const imageSize = { width: 320, height: 400 };
-
-    // Get front width measurements (converted to cm)
-    const frontMeasurements = processFrontView(frontLandmarks, userProfile);
-    const sideMeasurements = processSideView(sideLandmarks);
-
-    // Calculate circumferences using ellipse approximation
-    const chestCirc = estimateCircumference(
-      Number(frontMeasurements.shoulderWidth.value),
-      Number(sideMeasurements.chestDepth.value) * 0.1, // Convert pixels to approximate cm
-      "chest",
-      userProfile
-    );
-
-    const waistCirc = estimateCircumference(
-      Number(frontMeasurements.waistWidth.value),
-      Number(sideMeasurements.waistDepth.value) * 0.1,
-      "waist",
-      userProfile
-    );
-
-    const hipCirc = estimateCircumference(
-      Number(frontMeasurements.hipWidth.value),
-      Number(sideMeasurements.hipDepth.value) * 0.1,
-      "hips",
-      userProfile
-    );
-
-    // Convert confidence scores to display format
-    const chestConfidence = getConfidenceDisplay(chestCirc.confidence);
-    const waistConfidence = getConfidenceDisplay(waistCirc.confidence);
-    const hipConfidence = getConfidenceDisplay(hipCirc.confidence);
-
-    return {
-      chestCircumference: {
-        value: chestCirc.value.toFixed(1),
-        confidence: chestConfidence.score,
-        confidencePercentage: chestConfidence.percentage,
-        confidenceLabel: chestConfidence.label,
-        source: "front_and_side_combined",
-        unit: "cm",
-        method: chestCirc.method,
-      },
-      waistCircumference: {
-        value: waistCirc.value.toFixed(1),
-        confidence: waistConfidence.score,
-        confidencePercentage: waistConfidence.percentage,
-        confidenceLabel: waistConfidence.label,
-        source: "front_and_side_combined",
-        unit: "cm",
-        method: waistCirc.method,
-      },
-      hipCircumference: {
-        value: hipCirc.value.toFixed(1),
-        confidence: hipConfidence.score,
-        confidencePercentage: hipConfidence.percentage,
-        confidenceLabel: hipConfidence.label,
-        source: "front_and_side_combined",
-        unit: "cm",
-        method: hipCirc.method,
-      },
-    };
-  };
-
-  // Draw landmarks on canvas
-  const drawLandmarks = async (landmarks, imageSrc) => {
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    const img = await loadImage(imageSrc);
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    // Draw landmarks
-    for (const landmark of landmarks) {
-      ctx.beginPath();
-      ctx.arc(
-        landmark.x * canvas.width,
-        landmark.y * canvas.height,
-        4,
-        0,
-        2 * Math.PI
-      );
-      ctx.fillStyle = "red";
-      ctx.fill();
-    }
-  };
-
   // Reset sequence
   const resetSequence = () => {
     setCurrentStep(0);
     setCapturedPhotos({});
     setIsSequenceComplete(false);
-    setResults(null);
+    // setResults(null); // This is now managed by the hook
   };
 
   // Check if user profile is complete
   const isProfileComplete = userHeight && userWeight && userGender;
+
+  // User profile object
+  const userProfile = {
+    height: Number(userHeight),
+    weight: Number(userWeight),
+    gender: userGender,
+    age: Number(userAge),
+    bmi:
+      userWeight && userHeight
+        ? (Number(userWeight) / Math.pow(Number(userHeight) / 100, 2)).toFixed(
+            1
+          )
+        : null,
+  };
+
+  // Handler for processing all photos
+  const handleProcessAllPhotos = () => {
+    processAll(capturedPhotos, userProfile, loadImage);
+  };
 
   // Tab navigation component
   const TabNavigation = () => (
@@ -1219,7 +587,7 @@ const App = () => {
 
                   <div style={{ display: "flex", gap: 16 }}>
                     <button
-                      onClick={processAllPhotos}
+                      onClick={handleProcessAllPhotos}
                       disabled={processing}
                       style={{
                         padding: "12px 24px",
@@ -1258,7 +626,7 @@ const App = () => {
           {results && (
             <div style={{ marginTop: 24 }}>
               <h2>Your Body Measurements</h2>
-              {results.error ? (
+              {processingError ? (
                 <div
                   style={{
                     color: "red",
@@ -1268,16 +636,16 @@ const App = () => {
                   }}
                 >
                   <div style={{ fontWeight: "bold", marginBottom: 8 }}>
-                    {results.error}
+                    {processingError.error}
                   </div>
-                  {results.errorMessage && (
+                  {processingError.errorMessage && (
                     <div
                       style={{ fontSize: 12, marginBottom: 12, opacity: 0.7 }}
                     >
-                      Technical details: {results.errorMessage}
+                      Technical details: {processingError.errorMessage}
                     </div>
                   )}
-                  {results.suggestions && (
+                  {processingError.suggestions && (
                     <div>
                       <div
                         style={{
@@ -1289,14 +657,16 @@ const App = () => {
                         💡 Try these solutions:
                       </div>
                       <ul style={{ margin: 0, paddingLeft: 20 }}>
-                        {results.suggestions.map((suggestion, index) => (
-                          <li
-                            key={index}
-                            style={{ marginBottom: 4, fontSize: 13 }}
-                          >
-                            {suggestion}
-                          </li>
-                        ))}
+                        {processingError.suggestions.map(
+                          (suggestion, index) => (
+                            <li
+                              key={index}
+                              style={{ marginBottom: 4, fontSize: 13 }}
+                            >
+                              {suggestion}
+                            </li>
+                          )
+                        )}
                       </ul>
                     </div>
                   )}
