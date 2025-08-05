@@ -12,6 +12,7 @@ import {
   getConfidenceDisplay,
 } from '../utils/measurement';
 
+const IMAGE_SIZE = { width: 600, height: 600 };
 const calculateMultiAngleMeasurements = (processedResults, userProfile) => {
   const measurements = {};
   // Process front view (core measurements)
@@ -67,7 +68,7 @@ const calculateMultiAngleMeasurements = (processedResults, userProfile) => {
 };
 
 const processFrontView = (landmarks, userProfile) => {
-  const imageSize = { width: 320, height: 400 };
+  const imageSize = IMAGE_SIZE;
   const lShoulder = landmarks[11];
   const rShoulder = landmarks[12];
   const lWrist = landmarks[15];
@@ -77,7 +78,12 @@ const processFrontView = (landmarks, userProfile) => {
   const lAnkle = landmarks[27];
   const rAnkle = landmarks[28];
   const top = landmarks[0]; // Nose/head
-  const ankle = lAnkle && rAnkle ? (lAnkle.y > rAnkle.y ? lAnkle : rAnkle) : lAnkle || rAnkle;
+  const ankle =
+    lAnkle && rAnkle
+      ? lAnkle.y > rAnkle.y
+        ? lAnkle
+        : rAnkle
+      : lAnkle || rAnkle;
   const poseHeight = Math.abs(top.y - ankle.y);
   const shoulderPx = getDistance(
     { x: lShoulder.x * imageSize.width, y: lShoulder.y * imageSize.height },
@@ -106,18 +112,84 @@ const processFrontView = (landmarks, userProfile) => {
     { x: rAnkle.x * imageSize.width, y: rAnkle.y * imageSize.height }
   );
   const legLengthPx = Math.max(leftLegPx, rightLegPx);
-  const shoulderWidth = pixelToCm(shoulderPx, imageSize.height, userProfile.height, poseHeight);
-  const hipWidth = pixelToCm(hipPx, imageSize.height, userProfile.height, poseHeight);
-  const waistWidth = pixelToCm(waistPx, imageSize.height, userProfile.height, poseHeight);
-  const armLength = pixelToCm(armLengthPx, imageSize.height, userProfile.height, poseHeight);
-  const legLength = pixelToCm(legLengthPx, imageSize.height, userProfile.height, poseHeight);
+  const shoulderWidth = pixelToCm(
+    shoulderPx,
+    imageSize.height,
+    userProfile.height,
+    poseHeight
+  );
+  // Calculate shoulder blade width as horizontal distance from vertical projection of 6 to 12
+  const point6 = landmarks[5]; // mata kanan
+  const projectedPoint = { x: point6.x, y: rShoulder.y };
+  const shoulderBladePx = getDistance(
+    {
+      x: projectedPoint.x * imageSize.width,
+      y: projectedPoint.y * imageSize.height,
+    },
+    { x: rShoulder.x * imageSize.width, y: rShoulder.y * imageSize.height }
+  );
+  const shoulderBladeWidth = pixelToCm(
+    shoulderBladePx,
+    imageSize.height,
+    userProfile.height,
+    poseHeight
+  );
+  const shoulderBladeConfidence = getConfidenceDisplay(
+    calculateLandmarkConfidence(landmarks, [6, 12])
+  );
+  const hipWidth = pixelToCm(
+    hipPx,
+    imageSize.height,
+    userProfile.height,
+    poseHeight
+  );
+  const waistWidth = pixelToCm(
+    waistPx,
+    imageSize.height,
+    userProfile.height,
+    poseHeight
+  );
+  const armLength = pixelToCm(
+    armLengthPx,
+    imageSize.height,
+    userProfile.height,
+    poseHeight
+  );
+  const legLength = pixelToCm(
+    legLengthPx,
+    imageSize.height,
+    userProfile.height,
+    poseHeight
+  );
   const chestPx = shoulderPx * 0.85;
-  const chestWidth = pixelToCm(chestPx, imageSize.height, userProfile.height, poseHeight);
-  const shoulderConfidence = getConfidenceDisplay(calculateLandmarkConfidence(landmarks, [11, 12]));
-  const hipConfidence = getConfidenceDisplay(calculateLandmarkConfidence(landmarks, [23, 24]));
-  const armConfidence = getConfidenceDisplay(calculateLandmarkConfidence(landmarks, [11, 12, 15, 16]));
-  const legConfidence = getConfidenceDisplay(calculateLandmarkConfidence(landmarks, [23, 24, 27, 28]));
+  const chestWidth = pixelToCm(
+    chestPx,
+    imageSize.height,
+    userProfile.height,
+    poseHeight
+  );
+  const shoulderConfidence = getConfidenceDisplay(
+    calculateLandmarkConfidence(landmarks, [11, 12])
+  );
+  const hipConfidence = getConfidenceDisplay(
+    calculateLandmarkConfidence(landmarks, [23, 24])
+  );
+  const armConfidence = getConfidenceDisplay(
+    calculateLandmarkConfidence(landmarks, [11, 12, 15, 16])
+  );
+  const legConfidence = getConfidenceDisplay(
+    calculateLandmarkConfidence(landmarks, [23, 24, 27, 28])
+  );
   return {
+    shoulderBladeWidth: {
+      value: shoulderBladeWidth.toFixed(1),
+      confidence: shoulderBladeConfidence.score,
+      confidencePercentage: shoulderBladeConfidence.percentage,
+      confidenceLabel: shoulderBladeConfidence.label,
+      source: "front_view",
+      unit: "cm",
+      method: "front_view",
+    },
     shoulderWidth: {
       value: shoulderWidth.toFixed(1),
       confidence: shoulderConfidence.score,
@@ -125,6 +197,7 @@ const processFrontView = (landmarks, userProfile) => {
       confidenceLabel: shoulderConfidence.label,
       source: "front_view",
       unit: "cm",
+      method: "front_view",
     },
     chestWidth: {
       value: chestWidth.toFixed(1),
@@ -133,6 +206,7 @@ const processFrontView = (landmarks, userProfile) => {
       confidenceLabel: shoulderConfidence.percentage > 70 ? "medium" : "low",
       source: "front_view_estimated",
       unit: "cm",
+      method: "front_view_estimated",
     },
     hipWidth: {
       value: hipWidth.toFixed(1),
@@ -141,6 +215,7 @@ const processFrontView = (landmarks, userProfile) => {
       confidenceLabel: hipConfidence.label,
       source: "front_view",
       unit: "cm",
+      method: "front_view",
     },
     waistWidth: {
       value: waistWidth.toFixed(1),
@@ -149,6 +224,7 @@ const processFrontView = (landmarks, userProfile) => {
       confidenceLabel: "medium",
       source: "front_view_estimated",
       unit: "cm",
+      method: "front_view_estimated",
     },
     armLength: {
       value: armLength.toFixed(1),
@@ -157,6 +233,7 @@ const processFrontView = (landmarks, userProfile) => {
       confidenceLabel: armConfidence.label,
       source: "front_view",
       unit: "cm",
+      method: "front_view",
     },
     sleeveLength: {
       value: (armLength * 0.95).toFixed(1),
@@ -165,6 +242,7 @@ const processFrontView = (landmarks, userProfile) => {
       confidenceLabel: armConfidence.percentage > 70 ? "medium" : "low",
       source: "front_view_estimated",
       unit: "cm",
+      method: "front_view_estimated",
     },
     legLength: {
       value: legLength.toFixed(1),
@@ -173,6 +251,7 @@ const processFrontView = (landmarks, userProfile) => {
       confidenceLabel: legConfidence.label,
       source: "front_view",
       unit: "cm",
+      method: "front_view",
     },
     pantsLength: {
       value: (legLength * 0.92).toFixed(1),
@@ -181,15 +260,15 @@ const processFrontView = (landmarks, userProfile) => {
       confidenceLabel: legConfidence.percentage > 70 ? "medium" : "low",
       source: "front_view_estimated",
       unit: "cm",
+      method: "front_view_estimated",
     },
   };
 };
 
 const processBackView = (landmarks, userProfile) => {
-  const imageSize = { width: 320, height: 400 };
+  const imageSize = IMAGE_SIZE;
   const nose = landmarks[0];
   const lShoulder = landmarks[11];
-  const rShoulder = landmarks[12];
   const lHip = landmarks[23];
   const rHip = landmarks[24];
   const neckY = nose.y + (lShoulder.y - nose.y) * 0.8;
@@ -197,16 +276,22 @@ const processBackView = (landmarks, userProfile) => {
   const backLengthPx = Math.abs(waistY - neckY) * imageSize.height;
   const lAnkle = landmarks[27];
   const rAnkle = landmarks[28];
-  const ankle = lAnkle && rAnkle ? (lAnkle.y > rAnkle.y ? lAnkle : rAnkle) : lAnkle || rAnkle;
+  const ankle =
+    lAnkle && rAnkle
+      ? lAnkle.y > rAnkle.y
+        ? lAnkle
+        : rAnkle
+      : lAnkle || rAnkle;
   const poseHeight = Math.abs(nose.y - ankle.y);
-  const backLength = pixelToCm(backLengthPx, imageSize.height, userProfile.height, poseHeight);
-  const shoulderBladePx = getDistance(
-    { x: lShoulder.x * imageSize.width, y: lShoulder.y * imageSize.height },
-    { x: rShoulder.x * imageSize.width, y: rShoulder.y * imageSize.height }
+  const backLength = pixelToCm(
+    backLengthPx,
+    imageSize.height,
+    userProfile.height,
+    poseHeight
   );
-  const shoulderBladeWidth = pixelToCm(shoulderBladePx, imageSize.height, userProfile.height, poseHeight);
-  const backConfidence = getConfidenceDisplay(calculateLandmarkConfidence(landmarks, [0, 11, 12, 23, 24]));
-  const shoulderBladeConfidence = getConfidenceDisplay(calculateLandmarkConfidence(landmarks, [11, 12]));
+  const backConfidence = getConfidenceDisplay(
+    calculateLandmarkConfidence(landmarks, [0, 11, 12, 23, 24])
+  );
   return {
     backLength: {
       value: backLength.toFixed(1),
@@ -215,25 +300,19 @@ const processBackView = (landmarks, userProfile) => {
       confidenceLabel: backConfidence.label,
       source: "back_view",
       unit: "cm",
-    },
-    shoulderBladeWidth: {
-      value: shoulderBladeWidth.toFixed(1),
-      confidence: shoulderBladeConfidence.score,
-      confidencePercentage: shoulderBladeConfidence.percentage,
-      confidenceLabel: shoulderBladeConfidence.label,
-      source: "back_view",
-      unit: "cm",
+      method: "back_view",
     },
   };
 };
 
 const processSideView = (landmarks) => {
-  const imageSize = { width: 320, height: 400 };
+  const imageSize = IMAGE_SIZE;
   const leftShoulder = landmarks[11];
   const rightShoulder = landmarks[12];
   const leftHip = landmarks[23];
   const rightHip = landmarks[24];
-  const shoulderDepth = Math.abs(leftShoulder.x - rightShoulder.x) * imageSize.width;
+  const shoulderDepth =
+    Math.abs(leftShoulder.x - rightShoulder.x) * imageSize.width;
   const hipDepth = Math.abs(leftHip.x - rightHip.x) * imageSize.width;
   const chestDepth = shoulderDepth * 1.1;
   const waistDepth = (chestDepth + hipDepth) / 2;
@@ -243,24 +322,27 @@ const processSideView = (landmarks) => {
       confidence: "medium",
       source: "side_view",
       unit: "pixels",
+      method: "side_view",
     },
     waistDepth: {
       value: waistDepth.toFixed(1),
       confidence: "medium",
       source: "side_view",
       unit: "pixels",
+      method: "side_view",
     },
     hipDepth: {
       value: hipDepth.toFixed(1),
       confidence: "medium",
       source: "side_view",
       unit: "pixels",
+      method: "side_view",
     },
   };
 };
 
 const processArmsExtended = (landmarks, userProfile) => {
-  const imageSize = { width: 320, height: 400 };
+  const imageSize = IMAGE_SIZE;
   const bicepsResult = estimateBiceps(landmarks, userProfile);
   const leftWrist = landmarks[15];
   const rightWrist = landmarks[16];
@@ -284,6 +366,7 @@ const processArmsExtended = (landmarks, userProfile) => {
         confidenceLabel: bicepsResult.confidenceLabel,
         source: "arms_extended",
         unit: "cm",
+        method: "arms_extended",
       },
       armSpan: {
         value: armSpanCm.toFixed(1),
@@ -292,6 +375,7 @@ const processArmsExtended = (landmarks, userProfile) => {
         confidenceLabel: armSpanConfidence.label,
         source: "arms_extended",
         unit: "cm",
+        method: "arms_extended",
       },
     };
   }
@@ -303,14 +387,20 @@ const processArmsExtended = (landmarks, userProfile) => {
       confidenceLabel: bicepsResult.confidenceLabel,
       source: "arms_extended",
       unit: "cm",
+      method: "arms_extended",
     },
   };
 };
 
 const processLegsApart = (landmarks, userProfile) => {
-  const imageSize = { width: 320, height: 400 };
+  const imageSize = IMAGE_SIZE;
   const thighResult = estimateThigh(landmarks, userProfile, imageSize);
-  const calfResult = estimateCalf(landmarks, userProfile, imageSize, thighResult);
+  const calfResult = estimateCalf(
+    landmarks,
+    userProfile,
+    imageSize,
+    thighResult
+  );
   return {
     thigh: {
       value: thighResult.value.toFixed(1),
@@ -319,6 +409,7 @@ const processLegsApart = (landmarks, userProfile) => {
       confidenceLabel: thighResult.confidenceLabel,
       source: "legs_apart",
       unit: "cm",
+      method: "legs_apart",
     },
     calf: {
       value: calfResult.value.toFixed(1),
@@ -327,6 +418,7 @@ const processLegsApart = (landmarks, userProfile) => {
       confidenceLabel: calfResult.confidenceLabel,
       source: "legs_apart",
       unit: "cm",
+      method: "legs_apart",
     },
   };
 };
