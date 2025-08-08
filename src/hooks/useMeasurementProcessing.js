@@ -1,9 +1,15 @@
 import { useState, useCallback } from 'react';
 import usePoseDetection from './usePoseDetection';
 import { calculateMultiAngleMeasurements } from '../logic/measurementCalculations';
+import { storeMeasurements } from "../api";
 
 export default function useMeasurementProcessing() {
-  const { initialize, detectPose, status: poseStatus, error: poseError } = usePoseDetection();
+  const {
+    initialize,
+    detectPose,
+    status: poseStatus,
+    error: poseError,
+  } = usePoseDetection();
   const [results, setResults] = useState(null);
   const [processing, setProcessing] = useState(false);
   const [error, setError] = useState(null);
@@ -16,19 +22,23 @@ export default function useMeasurementProcessing() {
       setError(null);
       try {
         // Ensure pose detection is ready
-        let poseReady = poseStatus === 'ready';
+        let poseReady = poseStatus === "ready";
         let detectorObj = null;
         if (!poseReady) {
           detectorObj = await initialize();
           poseReady = detectorObj && detectorObj.detector;
         }
-        if (!poseReady) throw new Error('Pose detector not initialized');
+        if (!poseReady) throw new Error("Pose detector not initialized");
         const processedResults = {};
         for (const [stepId, imageSrc] of Object.entries(capturedPhotos)) {
           try {
             const img = await loadImage(imageSrc);
             const poseResults = await detectPose(img);
-            if (poseResults && poseResults.landmarks && poseResults.landmarks.length > 0) {
+            if (
+              poseResults &&
+              poseResults.landmarks &&
+              poseResults.landmarks.length > 0
+            ) {
               processedResults[stepId] = {
                 landmarks: poseResults.landmarks,
                 image: img,
@@ -38,16 +48,29 @@ export default function useMeasurementProcessing() {
             }
           } catch (stepError) {
             // Continue with other photos even if one fails
-            console.error('Error processing step', stepId, stepError);
+            console.error("Error processing step", stepId, stepError);
           }
         }
         if (Object.keys(processedResults).length === 0) {
-          throw new Error('No pose landmarks detected in any photos.');
+          throw new Error("No pose landmarks detected in any photos.");
         }
-        const measurements = calculateMultiAngleMeasurements(processedResults, userProfile);
+        const measurements = calculateMultiAngleMeasurements(
+          processedResults,
+          userProfile
+        );
+        for (const [key, value] of Object.entries(measurements)) {
+          console.log("measurement", key, value, userProfile);
+          await storeMeasurements(
+            {
+              type: key,
+              ...value,
+            },
+            userProfile
+          );
+        }
         setResults(measurements);
       } catch (err) {
-        setError(err.message || 'Processing failed.');
+        setError(err.message || "Processing failed.");
       }
       setProcessing(false);
     },
